@@ -13,15 +13,18 @@ export async function POST(req: NextRequest) {
       )
     }
 
-    const apiKey = process.env.OPENAI_API_KEY
+    const apiKey = process.env.GROQ_API_KEY
     if (!apiKey) {
       return NextResponse.json(
-        { error: 'OpenAI API key not configured' },
+        { error: 'Groq API key not configured' },
         { status: 500 }
       )
     }
 
-    const openai = new OpenAI({ apiKey })
+    const openai = new OpenAI({
+      apiKey,
+      baseURL: "https://api.groq.com/openai/v1"
+    })
 
     // =========================
     // Fetch website for context
@@ -94,7 +97,7 @@ Output ONLY the email body.
     // =========================
 
     const completion = await openai.chat.completions.create({
-      model: 'gpt-4o-mini',
+      model: 'llama3-70b-8192',
       messages: [
         { role: 'system', content: 'You write extremely personalized cold emails.' },
         { role: 'user', content: prompt }
