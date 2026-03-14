@@ -13,10 +13,10 @@ export async function POST(req: NextRequest) {
       )
     }
 
-    const apiKey = process.env.GROQ_API_KEY
+    const apiKey = process.env.OPENAI_API_KEY
     if (!apiKey) {
       return NextResponse.json(
-        { error: 'Groq API key not configured' },
+        { error: 'API key not configured' },
         { status: 500 }
       )
     }
@@ -77,7 +77,7 @@ Instructions:
 • Sound natural and human
 • No generic phrases
 • Keep the email under 90 words
-• Write like a founder reaching out, not a marketing robot
+• Write like a founder reaching out
 • Avoid buzzwords
 • Make it feel individually written
 
@@ -97,7 +97,7 @@ Output ONLY the email body.
     // =========================
 
     const completion = await openai.chat.completions.create({
-      model: 'llama3-70b-8192',
+      model: 'llama-3.1-70b-versatile',
       messages: [
         { role: 'system', content: 'You write extremely personalized cold emails.' },
         { role: 'user', content: prompt }
