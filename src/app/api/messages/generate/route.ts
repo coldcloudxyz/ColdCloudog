@@ -97,7 +97,7 @@ Output ONLY the email body.
     // =========================
 
     const completion = await openai.chat.completions.create({
-      model: 'llama-3.1-70b-versatile',
+      model: 'llama-3.1-70b-192',
       messages: [
         { role: 'system', content: 'You write extremely personalized cold emails.' },
         { role: 'user', content: prompt }
