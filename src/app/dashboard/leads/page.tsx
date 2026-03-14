@@ -3,7 +3,7 @@
 import { useEffect, useState, useCallback } from 'react'
 import {
   Users, Plus, Upload, Search, Sparkles, Mail,
-  ExternalLink, Trash2, Loader2, X, Calendar, RefreshCw
+  ExternalLink, Trash2, Loader2, X, Calendar, RefreshCw, PenLine
 } from 'lucide-react'
 import { useDropzone } from 'react-dropzone'
 import Papa from 'papaparse'
@@ -77,15 +77,15 @@ export default function LeadsPage() {
       if (showLeadDetail?.id === lead.id) setShowLeadDetail(updated)
       toast.success('AI message generated!')
     } catch (e: any) {
-      toast.error(e.message || 'Failed to generate message')
+      toast.error(e.message || 'Failed to generate — you can type a message manually.')
     } finally {
       setGeneratingMessage(null)
     }
   }
 
   async function sendEmail(lead: Lead) {
-    if (!lead.personalized_message) {
-      toast.error('Generate a message first!')
+    if (!lead.personalized_message?.trim()) {
+      toast.error('Write or generate a message first.')
       return
     }
     setSendingEmail(lead.id)
@@ -142,6 +142,16 @@ export default function LeadsPage() {
       toast.success(`Imported ${data.leads?.length} leads!`)
     } catch (e: any) {
       toast.error('Import failed: ' + e.message)
+    }
+  }
+
+  // Called from the detail modal when user edits message manually
+  function handleMessageChange(leadId: string, message: string) {
+    setLeads(prev =>
+      prev.map(l => (l.id === leadId ? { ...l, personalized_message: message } : l))
+    )
+    if (showLeadDetail?.id === leadId) {
+      setShowLeadDetail(prev => prev ? { ...prev, personalized_message: message } : prev)
     }
   }
 
@@ -312,14 +322,21 @@ export default function LeadsPage() {
                           </button>
                           <button
                             onClick={() => sendEmail(lead)}
-                            disabled={sendingEmail === lead.id || !lead.personalized_message}
+                            disabled={
+                              sendingEmail === lead.id ||
+                              !lead.personalized_message?.trim()
+                            }
                             className={cn(
                               'btn-ghost py-1.5 px-2 text-xs',
-                              lead.personalized_message
+                              lead.personalized_message?.trim()
                                 ? 'text-green-600 dark:text-green-400'
                                 : 'text-surface-300 cursor-not-allowed'
                             )}
-                            title={lead.personalized_message ? 'Send email' : 'Generate a message first'}
+                            title={
+                              lead.personalized_message?.trim()
+                                ? 'Send email'
+                                : 'Write or generate a message first'
+                            }
                           >
                             {sendingEmail === lead.id
                               ? <Loader2 className="w-3.5 h-3.5 animate-spin" />
@@ -359,11 +376,11 @@ export default function LeadsPage() {
           onClose={() => setShowLeadDetail(null)}
           onGenerateMessage={() => generateMessage(showLeadDetail)}
           onSendEmail={() => sendEmail(showLeadDetail)}
+          onMessageChange={msg => handleMessageChange(showLeadDetail.id, msg)}
           generating={generatingMessage === showLeadDetail.id}
           sending={sendingEmail === showLeadDetail.id}
         />
       )}
-
     </div>
   )
 }
@@ -487,11 +504,11 @@ function AddLeadModal({
         </div>
         <form onSubmit={handleSubmit} className="space-y-4">
           {[
-            { key: 'name',     label: 'Full Name',    placeholder: 'Alex Johnson',            required: true  },
-            { key: 'company',  label: 'Company',      placeholder: 'Acme Inc.',               required: true  },
-            { key: 'email',    label: 'Email',        placeholder: 'alex@acme.com',           required: true, type: 'email' },
-            { key: 'website',  label: 'Website',      placeholder: 'https://acme.com',        required: false },
-            { key: 'linkedin', label: 'LinkedIn URL', placeholder: 'https://linkedin.com/in/...', required: false },
+            { key: 'name',     label: 'Full Name',    placeholder: 'Alex Johnson',                required: true              },
+            { key: 'company',  label: 'Company',      placeholder: 'Acme Inc.',                  required: true              },
+            { key: 'email',    label: 'Email',        placeholder: 'alex@acme.com',              required: true, type:'email' },
+            { key: 'website',  label: 'Website',      placeholder: 'https://acme.com',           required: false             },
+            { key: 'linkedin', label: 'LinkedIn URL', placeholder: 'https://linkedin.com/in/...', required: false             },
           ].map(({ key, label, placeholder, required, type }) => (
             <div key={key}>
               <label className="block text-sm font-medium mb-1.5">{label}</label>
@@ -510,9 +527,7 @@ function AddLeadModal({
               Cancel
             </button>
             <button type="submit" disabled={saving} className="btn-primary flex-1">
-              {saving
-                ? <Loader2 className="w-4 h-4 animate-spin" />
-                : <Plus className="w-4 h-4" />}
+              {saving ? <Loader2 className="w-4 h-4 animate-spin" /> : <Plus className="w-4 h-4" />}
               {saving ? 'Adding...' : 'Add Lead'}
             </button>
           </div>
@@ -531,6 +546,7 @@ function LeadDetailModal({
   onClose,
   onGenerateMessage,
   onSendEmail,
+  onMessageChange,
   generating,
   sending,
 }: {
@@ -538,9 +554,12 @@ function LeadDetailModal({
   onClose: () => void
   onGenerateMessage: () => void
   onSendEmail: () => void
+  onMessageChange: (msg: string) => void
   generating: boolean
   sending: boolean
 }) {
+  const hasMessage = !!lead.personalized_message?.trim()
+
   return (
     <div className="fixed inset-0 z-50 flex items-end sm:items-center justify-center p-0 sm:p-4">
       <div className="fixed inset-0 bg-black/50" onClick={onClose} />
@@ -610,10 +629,22 @@ function LeadDetailModal({
           ))}
         </div>
 
-        {/* AI Message */}
+        {/* ── Message section ── */}
         <div className="mb-5">
           <div className="flex items-center justify-between mb-2">
-            <h3 className="font-semibold text-sm">AI Personalized Message</h3>
+            <div className="flex items-center gap-2">
+              <h3 className="font-semibold text-sm">Outreach Message</h3>
+              {/* Pill shows which mode is active */}
+              <span className={cn(
+                'text-xs px-2 py-0.5 rounded-full font-medium',
+                hasMessage
+                  ? 'bg-brand-50 dark:bg-brand-950 text-brand-600 dark:text-brand-400'
+                  : 'bg-surface-100 dark:bg-surface-800 text-surface-400'
+              )}>
+                {hasMessage ? (lead.personalized_message!.trim().startsWith('Hi') ? 'AI / Edited' : 'Manual') : 'Empty'}
+              </span>
+            </div>
+            {/* Generate with AI button */}
             <button
               onClick={onGenerateMessage}
               disabled={generating}
@@ -624,10 +655,11 @@ function LeadDetailModal({
                 : <Sparkles className="w-3.5 h-3.5" />}
               {generating
                 ? 'Generating...'
-                : lead.personalized_message ? 'Regenerate' : 'Generate with AI'}
+                : hasMessage ? 'Regenerate with AI' : 'Generate with AI'}
             </button>
           </div>
 
+          {/* Loading overlay while AI runs */}
           {generating ? (
             <div className="bg-surface-50 dark:bg-surface-800 rounded-lg p-8 text-center border border-surface-200 dark:border-surface-700">
               <Loader2 className="w-6 h-6 animate-spin mx-auto text-brand-500 mb-2" />
@@ -640,20 +672,34 @@ function LeadDetailModal({
                 This takes 5–10 seconds
               </p>
             </div>
-          ) : lead.personalized_message ? (
-            <div className="bg-surface-50 dark:bg-surface-800 rounded-lg p-4 text-sm text-surface-700 dark:text-surface-300 whitespace-pre-wrap border border-brand-200 dark:border-brand-800 leading-relaxed">
-              {lead.personalized_message}
-            </div>
           ) : (
-            <div className="bg-surface-50 dark:bg-surface-800 rounded-lg p-8 text-center border-2 border-dashed border-surface-200 dark:border-surface-700">
-              <Sparkles className="w-8 h-8 mx-auto mb-2 text-surface-300 dark:text-surface-600" />
-              <p className="text-sm font-medium text-surface-500">No message yet</p>
-              <p className="text-xs text-surface-400 mt-1">
-                {lead.website
-                  ? `AI will read ${lead.website} and write a personalized email`
-                  : 'AI will write a personalized email based on company context'}
-              </p>
-            </div>
+            <>
+              {/* Always-visible editable textarea */}
+              <textarea
+                value={lead.personalized_message ?? ''}
+                onChange={e => onMessageChange(e.target.value)}
+                rows={10}
+                placeholder={
+                  `Write your message to ${lead.name} here, or click "Generate with AI" to create one automatically.\n\nTip: Mention something specific about ${lead.company} to boost reply rates.`
+                }
+                className={cn(
+                  'input-base resize-none text-sm leading-relaxed font-normal',
+                  hasMessage
+                    ? 'border-brand-200 dark:border-brand-800'
+                    : 'border-surface-200 dark:border-surface-700'
+                )}
+              />
+              {/* Helper row below textarea */}
+              <div className="flex items-center justify-between mt-1.5">
+                <p className="text-xs text-surface-400 flex items-center gap-1">
+                  <PenLine className="w-3 h-3" />
+                  You can edit this message before sending
+                </p>
+                <p className="text-xs text-surface-400">
+                  {lead.personalized_message?.length ?? 0} chars
+                </p>
+              </div>
+            </>
           )}
         </div>
 
@@ -661,19 +707,33 @@ function LeadDetailModal({
         <div className="flex gap-3">
           <button
             onClick={onSendEmail}
-            disabled={sending || !lead.personalized_message || !!lead.email_sent_at}
-            className="btn-primary flex-1 justify-center"
+            disabled={sending || !hasMessage || !!lead.email_sent_at}
+            className={cn(
+              'flex-1 justify-center btn-primary',
+              (!hasMessage || !!lead.email_sent_at) && 'opacity-50 cursor-not-allowed'
+            )}
           >
             {sending
               ? <Loader2 className="w-4 h-4 animate-spin" />
               : <Mail className="w-4 h-4" />}
-            {sending ? 'Sending...' : lead.email_sent_at ? 'Already Sent ✓' : 'Send Email'}
+            {sending
+              ? 'Sending...'
+              : lead.email_sent_at
+                ? 'Already Sent ✓'
+                : 'Send Email'}
           </button>
           <button className="btn-secondary flex-1 justify-center">
             <Calendar className="w-4 h-4" />
             Send Calendly Link
           </button>
         </div>
+
+        {/* Hint when no message exists */}
+        {!hasMessage && !generating && (
+          <p className="text-xs text-center text-surface-400 mt-3">
+            Type a message above or click <span className="text-brand-500 font-medium">Generate with AI</span> to get started
+          </p>
+        )}
 
       </div>
     </div>

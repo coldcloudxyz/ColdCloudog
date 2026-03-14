@@ -13,17 +13,18 @@ export async function POST(req: NextRequest) {
       )
     }
 
-    const apiKey = process.env.GROQ_API_KEY
+    const apiKey = process.env.OPENROUTER_API_KEY
+
     if (!apiKey) {
       return NextResponse.json(
-        { error: 'API key not configured' },
+        { error: 'OpenRouter API key not configured' },
         { status: 500 }
       )
     }
 
     const openai = new OpenAI({
       apiKey,
-      baseURL: "https://api.groq.com/openai/v1"
+      baseURL: 'https://openrouter.ai/api/v1'
     })
 
     // =========================
@@ -55,7 +56,7 @@ export async function POST(req: NextRequest) {
     }
 
     // =========================
-    // AI Prompt
+    // Prompt
     // =========================
 
     const prompt = `
@@ -71,15 +72,13 @@ Website: ${website || 'Not provided'}
 ${websiteContext ? `Website content context:\n${websiteContext}` : ''}
 
 Instructions:
-
-• Mention something specific about their company, product, or market
+• Mention something specific about their company
 • Use the website context if available
 • Sound natural and human
 • No generic phrases
 • Keep the email under 90 words
 • Write like a founder reaching out
 • Avoid buzzwords
-• Make it feel individually written
 
 Goal:
 Start a friendly conversation and ask if they would be open to a quick 15-minute call.
@@ -93,11 +92,11 @@ Output ONLY the email body.
 `
 
     // =========================
-    // Generate AI email
+    // AI Generation
     // =========================
 
     const completion = await openai.chat.completions.create({
-      model: 'llama-3.1-70b-8192',
+      model: 'meta-llama/llama-3.1-70b-instruct',
       messages: [
         { role: 'system', content: 'You write extremely personalized cold emails.' },
         { role: 'user', content: prompt }
@@ -113,7 +112,7 @@ Output ONLY the email body.
     }
 
     // =========================
-    // Save message in Supabase
+    // Save to Supabase
     // =========================
 
     if (leadId) {
