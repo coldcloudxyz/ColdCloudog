@@ -8,11 +8,12 @@ import {
 import { useDropzone } from 'react-dropzone'
 import Papa from 'papaparse'
 import toast from 'react-hot-toast'
+import { supabase } from '@/lib/supabase'
 import { cn, getStatusColor, getStatusLabel, formatRelativeTime } from '@/lib/utils'
 import type { Lead, LeadStatus } from '@/types'
 
 const statusOptions: LeadStatus[] = [
-  'new', 'contacted', 'replied', 'meeting_booked', 'closed', 'unqualified'
+  'new', 'contacted', 'replied', 'meeting_booked', 'closed', 'unqualified',
 ]
 
 // ─────────────────────────────────────────────
@@ -36,8 +37,12 @@ export default function LeadsPage() {
   async function loadLeads() {
     setLoading(true)
     try {
+      // API route reads the session cookie and scopes to user_id
       const res = await fetch('/api/leads')
-      if (!res.ok) throw new Error('Failed to fetch leads')
+      if (!res.ok) {
+        const err = await res.json()
+        throw new Error(err.error ?? 'Failed to fetch leads')
+      }
       const data = await res.json()
       setLeads(data.leads ?? [])
     } catch (e: any) {
@@ -57,6 +62,7 @@ export default function LeadsPage() {
     return matchSearch && matchStatus
   })
 
+  // Calls /api/messages/generate — OpenAI reads the website
   async function generateMessage(lead: Lead) {
     setGeneratingMessage(lead.id)
     try {
@@ -64,25 +70,27 @@ export default function LeadsPage() {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
-          leadId: lead.id,
+          leadId:  lead.id,
           website: lead.website,
           company: lead.company,
-          name: lead.name,
+          name:    lead.name,
         }),
       })
       const data = await res.json()
-      if (!res.ok) throw new Error(data.error || 'Generation failed')
+      if (!res.ok) throw new Error(data.error ?? 'Generation failed')
+
       const updated = { ...lead, personalized_message: data.message }
       setLeads(prev => prev.map(l => (l.id === lead.id ? updated : l)))
       if (showLeadDetail?.id === lead.id) setShowLeadDetail(updated)
       toast.success('AI message generated!')
     } catch (e: any) {
-      toast.error(e.message || 'Failed to generate — you can type a message manually.')
+      toast.error(e.message ?? 'Failed to generate — you can type a message manually.')
     } finally {
       setGeneratingMessage(null)
     }
   }
 
+  // Calls /api/emails/send — sends via Resend
   async function sendEmail(lead: Lead) {
     if (!lead.personalized_message?.trim()) {
       toast.error('Write or generate a message first.')
@@ -94,14 +102,15 @@ export default function LeadsPage() {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
-          leadId: lead.id,
-          email: lead.email,
-          name: lead.name,
+          leadId:  lead.id,
+          email:   lead.email,
+          name:    lead.name,
           message: lead.personalized_message,
         }),
       })
       const data = await res.json()
-      if (!res.ok) throw new Error(data.error || 'Send failed')
+      if (!res.ok) throw new Error(data.error ?? 'Send failed')
+
       const updated: Lead = {
         ...lead,
         status: 'contacted' as LeadStatus,
@@ -111,7 +120,7 @@ export default function LeadsPage() {
       if (showLeadDetail?.id === lead.id) setShowLeadDetail(updated)
       toast.success(`Email sent to ${lead.name}!`)
     } catch (e: any) {
-      toast.error(e.message || 'Failed to send email')
+      toast.error(e.message ?? 'Failed to send email')
     } finally {
       setSendingEmail(null)
     }
@@ -121,8 +130,12 @@ export default function LeadsPage() {
     if (!confirm('Delete this lead?')) return
     try {
       const res = await fetch(`/api/leads?id=${id}`, { method: 'DELETE' })
-      if (!res.ok) throw new Error('Delete failed')
+      if (!res.ok) {
+        const err = await res.json()
+        throw new Error(err.error ?? 'Delete failed')
+      }
       setLeads(prev => prev.filter(l => l.id !== id))
+      if (showLeadDetail?.id === id) setShowLeadDetail(null)
       toast.success('Lead deleted')
     } catch (e: any) {
       toast.error('Delete failed: ' + e.message)
@@ -137,7 +150,7 @@ export default function LeadsPage() {
         body: JSON.stringify(rows),
       })
       const data = await res.json()
-      if (!res.ok) throw new Error(data.error || 'Import failed')
+      if (!res.ok) throw new Error(data.error ?? 'Import failed')
       setLeads(prev => [...(data.leads ?? []), ...prev])
       toast.success(`Imported ${data.leads?.length} leads!`)
     } catch (e: any) {
@@ -145,13 +158,14 @@ export default function LeadsPage() {
     }
   }
 
-  // Called from the detail modal when user edits message manually
   function handleMessageChange(leadId: string, message: string) {
     setLeads(prev =>
       prev.map(l => (l.id === leadId ? { ...l, personalized_message: message } : l))
     )
     if (showLeadDetail?.id === leadId) {
-      setShowLeadDetail(prev => prev ? { ...prev, personalized_message: message } : prev)
+      setShowLeadDetail(prev =>
+        prev ? { ...prev, personalized_message: message } : prev
+      )
     }
   }
 
@@ -167,11 +181,18 @@ export default function LeadsPage() {
           </p>
         </div>
         <div className="flex items-center gap-3">
-          <button onClick={loadLeads} className="btn-ghost text-sm" title="Refresh">
+          <button
+            onClick={loadLeads}
+            className="btn-ghost text-sm"
+            title="Refresh"
+          >
             <RefreshCw className={cn('w-4 h-4', loading && 'animate-spin')} />
           </button>
           <CSVUploader onImport={handleCSVImport} />
-          <button onClick={() => setShowAddModal(true)} className="btn-primary text-sm">
+          <button
+            onClick={() => setShowAddModal(true)}
+            className="btn-primary text-sm"
+          >
             <Plus className="w-4 h-4" />
             Add Lead
           </button>
@@ -218,7 +239,7 @@ export default function LeadsPage() {
         {loading ? (
           <div className="py-20 text-center">
             <Loader2 className="w-8 h-8 animate-spin mx-auto text-brand-500 mb-3" />
-            <p className="text-surface-400 text-sm">Loading from database...</p>
+            <p className="text-surface-400 text-sm">Loading your leads...</p>
           </div>
         ) : (
           <div className="overflow-x-auto">
@@ -251,7 +272,9 @@ export default function LeadsPage() {
                     <td colSpan={6} className="py-16 text-center text-surface-400">
                       <Users className="w-10 h-10 mx-auto mb-3 opacity-40" />
                       <p className="font-medium">
-                        {leads.length === 0 ? 'No leads yet' : 'No leads match filters'}
+                        {leads.length === 0
+                          ? 'No leads yet'
+                          : 'No leads match filters'}
                       </p>
                       <p className="text-sm mt-1">
                         {leads.length === 0
@@ -274,7 +297,9 @@ export default function LeadsPage() {
                           </div>
                           <div>
                             <p className="font-medium text-sm">{lead.name}</p>
-                            <p className="text-xs text-surface-400 md:hidden">{lead.company}</p>
+                            <p className="text-xs text-surface-400 md:hidden">
+                              {lead.company}
+                            </p>
                           </div>
                         </div>
                       </td>
@@ -402,12 +427,12 @@ function CSVUploader({ onImport }: { onImport: (rows: any[]) => void }) {
         complete: results => {
           const rows = (results.data as any[])
             .map(row => ({
-              name: row.name || row.Name || row.full_name || '',
-              company: row.company || row.Company || '',
-              email: row.email || row.Email || '',
-              website: row.website || row.Website || null,
+              name:     row.name     || row.Name     || row.full_name || '',
+              company:  row.company  || row.Company  || '',
+              email:    row.email    || row.Email    || '',
+              website:  row.website  || row.Website  || null,
               linkedin: row.linkedin || row.LinkedIn || null,
-              status: 'new' as LeadStatus,
+              status:   'new' as LeadStatus,
             }))
             .filter(r => r.name && r.email)
           if (rows.length === 0) {
@@ -457,11 +482,7 @@ function AddLeadModal({
   onAdd: (lead: Lead) => void
 }) {
   const [form, setForm] = useState({
-    name: '',
-    company: '',
-    email: '',
-    website: '',
-    linkedin: '',
+    name: '', company: '', email: '', website: '', linkedin: '',
   })
   const [saving, setSaving] = useState(false)
 
@@ -473,16 +494,16 @@ function AddLeadModal({
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
-          name: form.name,
-          company: form.company,
-          email: form.email,
-          website: form.website || null,
+          name:     form.name,
+          company:  form.company,
+          email:    form.email,
+          website:  form.website  || null,
           linkedin: form.linkedin || null,
-          status: 'new',
+          status:   'new',
         }),
       })
       const data = await res.json()
-      if (!res.ok) throw new Error(data.error || 'Failed to add lead')
+      if (!res.ok) throw new Error(data.error ?? 'Failed to add lead')
       onAdd(data.leads[0])
       toast.success('Lead added!')
     } catch (e: any) {
@@ -504,11 +525,11 @@ function AddLeadModal({
         </div>
         <form onSubmit={handleSubmit} className="space-y-4">
           {[
-            { key: 'name',     label: 'Full Name',    placeholder: 'Alex Johnson',                required: true              },
-            { key: 'company',  label: 'Company',      placeholder: 'Acme Inc.',                  required: true              },
-            { key: 'email',    label: 'Email',        placeholder: 'alex@acme.com',              required: true, type:'email' },
-            { key: 'website',  label: 'Website',      placeholder: 'https://acme.com',           required: false             },
-            { key: 'linkedin', label: 'LinkedIn URL', placeholder: 'https://linkedin.com/in/...', required: false             },
+            { key: 'name',     label: 'Full Name',    placeholder: 'Alex Johnson',                required: true               },
+            { key: 'company',  label: 'Company',      placeholder: 'Acme Inc.',                  required: true               },
+            { key: 'email',    label: 'Email',        placeholder: 'alex@acme.com',              required: true, type: 'email' },
+            { key: 'website',  label: 'Website',      placeholder: 'https://acme.com',           required: false              },
+            { key: 'linkedin', label: 'LinkedIn URL', placeholder: 'https://linkedin.com/in/...', required: false              },
           ].map(({ key, label, placeholder, required, type }) => (
             <div key={key}>
               <label className="block text-sm font-medium mb-1.5">{label}</label>
@@ -527,7 +548,9 @@ function AddLeadModal({
               Cancel
             </button>
             <button type="submit" disabled={saving} className="btn-primary flex-1">
-              {saving ? <Loader2 className="w-4 h-4 animate-spin" /> : <Plus className="w-4 h-4" />}
+              {saving
+                ? <Loader2 className="w-4 h-4 animate-spin" />
+                : <Plus className="w-4 h-4" />}
               {saving ? 'Adding...' : 'Add Lead'}
             </button>
           </div>
@@ -629,22 +652,20 @@ function LeadDetailModal({
           ))}
         </div>
 
-        {/* ── Message section ── */}
+        {/* Message section */}
         <div className="mb-5">
           <div className="flex items-center justify-between mb-2">
             <div className="flex items-center gap-2">
               <h3 className="font-semibold text-sm">Outreach Message</h3>
-              {/* Pill shows which mode is active */}
               <span className={cn(
                 'text-xs px-2 py-0.5 rounded-full font-medium',
                 hasMessage
                   ? 'bg-brand-50 dark:bg-brand-950 text-brand-600 dark:text-brand-400'
                   : 'bg-surface-100 dark:bg-surface-800 text-surface-400'
               )}>
-                {hasMessage ? (lead.personalized_message!.trim().startsWith('Hi') ? 'AI / Edited' : 'Manual') : 'Empty'}
+                {hasMessage ? 'Ready' : 'Empty'}
               </span>
             </div>
-            {/* Generate with AI button */}
             <button
               onClick={onGenerateMessage}
               disabled={generating}
@@ -659,7 +680,6 @@ function LeadDetailModal({
             </button>
           </div>
 
-          {/* Loading overlay while AI runs */}
           {generating ? (
             <div className="bg-surface-50 dark:bg-surface-800 rounded-lg p-8 text-center border border-surface-200 dark:border-surface-700">
               <Loader2 className="w-6 h-6 animate-spin mx-auto text-brand-500 mb-2" />
@@ -674,13 +694,12 @@ function LeadDetailModal({
             </div>
           ) : (
             <>
-              {/* Always-visible editable textarea */}
               <textarea
                 value={lead.personalized_message ?? ''}
                 onChange={e => onMessageChange(e.target.value)}
                 rows={10}
                 placeholder={
-                  `Write your message to ${lead.name} here, or click "Generate with AI" to create one automatically.\n\nTip: Mention something specific about ${lead.company} to boost reply rates.`
+                  `Write your message to ${lead.name} here, or click "Generate with AI" to create one automatically.\n\nTip: mention something specific about ${lead.company} to boost reply rates.`
                 }
                 className={cn(
                   'input-base resize-none text-sm leading-relaxed font-normal',
@@ -689,7 +708,6 @@ function LeadDetailModal({
                     : 'border-surface-200 dark:border-surface-700'
                 )}
               />
-              {/* Helper row below textarea */}
               <div className="flex items-center justify-between mt-1.5">
                 <p className="text-xs text-surface-400 flex items-center gap-1">
                   <PenLine className="w-3 h-3" />
@@ -718,9 +736,7 @@ function LeadDetailModal({
               : <Mail className="w-4 h-4" />}
             {sending
               ? 'Sending...'
-              : lead.email_sent_at
-                ? 'Already Sent ✓'
-                : 'Send Email'}
+              : lead.email_sent_at ? 'Already Sent ✓' : 'Send Email'}
           </button>
           <button className="btn-secondary flex-1 justify-center">
             <Calendar className="w-4 h-4" />
@@ -728,10 +744,11 @@ function LeadDetailModal({
           </button>
         </div>
 
-        {/* Hint when no message exists */}
         {!hasMessage && !generating && (
           <p className="text-xs text-center text-surface-400 mt-3">
-            Type a message above or click <span className="text-brand-500 font-medium">Generate with AI</span> to get started
+            Type a message above or click{' '}
+            <span className="text-brand-500 font-medium">Generate with AI</span>{' '}
+            to get started
           </p>
         )}
 
