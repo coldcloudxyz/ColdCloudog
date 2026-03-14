@@ -7,82 +7,134 @@ export async function POST(req: NextRequest) {
     const { leadId, website, company, name } = await req.json()
 
     if (!company || !name) {
-      return NextResponse.json({ error: 'Missing required fields' }, { status: 400 })
+      return NextResponse.json(
+        { error: 'Missing required fields' },
+        { status: 400 }
+      )
     }
 
     const apiKey = process.env.OPENAI_API_KEY
     if (!apiKey) {
-      return NextResponse.json({ error: 'OpenAI API key not configured' }, { status: 500 })
+      return NextResponse.json(
+        { error: 'OpenAI API key not configured' },
+        { status: 500 }
+      )
     }
 
     const openai = new OpenAI({ apiKey })
 
-    // Build context from website if provided
+    // =========================
+    // Fetch website for context
+    // =========================
+
     let websiteContext = ''
+
     if (website) {
       try {
         const res = await fetch(website, {
           headers: { 'User-Agent': 'Mozilla/5.0' },
-          signal: AbortSignal.timeout(5000),
+          signal: AbortSignal.timeout(7000)
         })
+
         const html = await res.text()
-        // Extract readable text from HTML (basic extraction)
+
         websiteContext = html
           .replace(/<script[^>]*>[\s\S]*?<\/script>/gi, '')
           .replace(/<style[^>]*>[\s\S]*?<\/style>/gi, '')
           .replace(/<[^>]+>/g, ' ')
           .replace(/\s+/g, ' ')
           .trim()
-          .slice(0, 2000)
+          .slice(0, 4000)
+
       } catch (e) {
-        // Website fetch failed, continue without context
+        console.log('Website fetch failed')
       }
     }
 
-    const prompt = `You are an expert cold email copywriter. Write a short, personalized B2B outreach email.
+    // =========================
+    // AI Prompt
+    // =========================
 
-Target:
-- Name: ${name}
-- Company: ${company}
-- Website: ${website || 'Not provided'}
-${websiteContext ? `\nWebsite content excerpt:\n${websiteContext}` : ''}
+    const prompt = `
+You are a world-class B2B cold email copywriter.
 
-Requirements:
-1. Reference something specific about their company (from website context if available, otherwise make a reasonable inference)
-2. Keep it under 100 words
-3. Be conversational and human, not salesy
-4. End with a soft CTA for a 15-minute call
-5. Do NOT use generic phrases like "I hope this email finds you well"
-6. Sign off with [Your Name]
+Write a highly personalized outreach email.
 
-Write ONLY the email body, no subject line, no extra commentary.`
+Target lead:
+Name: ${name}
+Company: ${company}
+Website: ${website || 'Not provided'}
+
+${websiteContext ? `Website content context:\n${websiteContext}` : ''}
+
+Instructions:
+
+• Mention something specific about their company, product, or market
+• Use the website context if available
+• Sound natural and human
+• No generic phrases
+• Keep the email under 90 words
+• Write like a founder reaching out, not a marketing robot
+• Avoid buzzwords
+• Make it feel individually written
+
+Goal:
+Start a friendly conversation and ask if they would be open to a quick 15-minute call.
+
+Sign off with:
+
+Sahil  
+Founder, ColdCloud
+
+Output ONLY the email body.
+`
+
+    // =========================
+    // Generate AI email
+    // =========================
 
     const completion = await openai.chat.completions.create({
       model: 'gpt-4o-mini',
-      messages: [{ role: 'user', content: prompt }],
+      messages: [
+        { role: 'system', content: 'You write extremely personalized cold emails.' },
+        { role: 'user', content: prompt }
+      ],
       max_tokens: 300,
-      temperature: 0.7,
+      temperature: 0.9
     })
 
     const message = completion.choices[0]?.message?.content?.trim()
-    if (!message) throw new Error('No message generated')
 
-    // Save to database if leadId provided
+    if (!message) {
+      throw new Error('No message generated')
+    }
+
+    // =========================
+    // Save message in Supabase
+    // =========================
+
     if (leadId) {
       try {
         const supabase = createAdminClient()
+
         await supabase
           .from('leads')
-          .update({ personalized_message: message, updated_at: new Date().toISOString() })
+          .update({
+            personalized_message: message,
+            updated_at: new Date().toISOString()
+          })
           .eq('id', leadId)
+
       } catch (e) {
-        // DB save failed, still return message
+        console.log('Supabase save failed')
       }
     }
 
     return NextResponse.json({ message })
+
   } catch (error: any) {
     console.error('Message generation error:', error)
+
     return NextResponse.json(
       { error: error.message || 'Failed to generate message' },
       { status: 500 }
