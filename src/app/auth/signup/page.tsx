@@ -4,7 +4,7 @@ import { useState } from 'react'
 import Link from 'next/link'
 import { useRouter } from 'next/navigation'
 import { Zap, Eye, EyeOff, ArrowRight, Loader2, CheckCircle2 } from 'lucide-react'
-import { supabase } from '@/lib/supabase'
+import { createBrowserClient } from '@/lib/supabase'
 import toast from 'react-hot-toast'
 
 const benefits = [
@@ -16,25 +16,40 @@ const benefits = [
 
 export default function SignupPage() {
   const router = useRouter()
-  const [form, setForm] = useState({ fullName: '', email: '', password: '' })
+
+  const [form, setForm] = useState({
+    fullName: '', email: '', password: '',
+  })
   const [showPassword, setShowPassword] = useState(false)
-  const [loading, setLoading] = useState(false)
+  const [loading,      setLoading]      = useState(false)
 
   const handleSignup = async (e: React.FormEvent) => {
     e.preventDefault()
     setLoading(true)
 
     try {
-      const { error } = await supabase.auth.signUp({
-        email: form.email,
+      const supabase = createBrowserClient()
+
+      const { data, error } = await supabase.auth.signUp({
+        email:    form.email.trim(),
         password: form.password,
         options: {
-          data: { full_name: form.fullName }
-        }
+          data: { full_name: form.fullName.trim() },
+        },
       })
+
       if (error) throw error
-      toast.success('Account created! Check your email to verify.')
-      router.push('/dashboard')
+
+      if (data.session) {
+        // Session created immediately (email confirmation disabled)
+        toast.success('Account created! Welcome to ColdCloud.')
+        router.refresh()
+        router.push('/dashboard')
+      } else if (data.user) {
+        // Email confirmation required
+        toast.success('Account created! Check your email to verify your account.')
+        router.push('/auth/login')
+      }
     } catch (error: any) {
       toast.error(error.message || 'Failed to create account')
     } finally {
@@ -44,6 +59,7 @@ export default function SignupPage() {
 
   return (
     <div className="min-h-screen bg-surface-50 dark:bg-surface-950 flex">
+
       {/* Left panel */}
       <div className="hidden lg:flex lg:w-1/2 bg-gradient-to-br from-brand-600 to-cyan-600 p-12 flex-col justify-between relative overflow-hidden">
         <div className="absolute inset-0 bg-grid-pattern opacity-20" />
@@ -56,32 +72,24 @@ export default function SignupPage() {
           </Link>
         </div>
         <div className="relative">
-          <h2 className="text-3xl font-bold text-white mb-4">Start booking more meetings today</h2>
-          <p className="text-brand-100 text-lg mb-8">Join 500+ companies automating their outbound sales with AI.</p>
+          <h2 className="text-3xl font-bold text-white mb-4">
+            Start booking more meetings today
+          </h2>
+          <p className="text-brand-100 text-lg mb-8">
+            Join 500+ companies automating their outbound sales with AI.
+          </p>
           <ul className="space-y-3">
-            {benefits.map((b) => (
+            {benefits.map(b => (
               <li key={b} className="flex items-center gap-3 text-white">
                 <CheckCircle2 className="w-5 h-5 text-cyan-300 flex-shrink-0" />
                 {b}
               </li>
             ))}
           </ul>
-
-          {/* Testimonial */}
-          <div className="mt-10 p-5 bg-white/10 backdrop-blur rounded-xl border border-white/20">
-            <p className="text-white text-sm italic mb-3">
-              "ColdCloud tripled our outbound response rates in the first month. The AI personalization is genuinely impressive."
-            </p>
-            <div className="flex items-center gap-2">
-              <div className="w-8 h-8 rounded-full bg-white/20 flex items-center justify-center text-white text-xs font-bold">SC</div>
-              <div>
-                <p className="text-white text-sm font-medium">Sarah Chen</p>
-                <p className="text-brand-200 text-xs">Founder, GrowthLab Agency</p>
-              </div>
-            </div>
-          </div>
         </div>
-        <div className="relative text-brand-200 text-sm">© 2025 ColdCloud. All rights reserved.</div>
+        <div className="relative text-brand-200 text-sm">
+          © 2025 ColdCloud. All rights reserved.
+        </div>
       </div>
 
       {/* Right panel */}
@@ -97,12 +105,16 @@ export default function SignupPage() {
           </div>
 
           <h1 className="text-2xl font-bold mb-2">Create your account</h1>
-          <p className="text-surface-500 dark:text-surface-400 text-sm mb-8">Start your 14-day free trial. No card needed.</p>
+          <p className="text-surface-500 dark:text-surface-400 text-sm mb-8">
+            Start your 14-day free trial. No card needed.
+          </p>
 
           <div className="card p-8">
             <form onSubmit={handleSignup} className="space-y-4">
               <div>
-                <label className="block text-sm font-medium text-surface-700 dark:text-surface-300 mb-1.5">Full name</label>
+                <label className="block text-sm font-medium text-surface-700 dark:text-surface-300 mb-1.5">
+                  Full name
+                </label>
                 <input
                   type="text"
                   value={form.fullName}
@@ -110,10 +122,13 @@ export default function SignupPage() {
                   className="input-base"
                   placeholder="Your name"
                   required
+                  autoFocus
                 />
               </div>
               <div>
-                <label className="block text-sm font-medium text-surface-700 dark:text-surface-300 mb-1.5">Work email</label>
+                <label className="block text-sm font-medium text-surface-700 dark:text-surface-300 mb-1.5">
+                  Work email
+                </label>
                 <input
                   type="email"
                   value={form.email}
@@ -121,10 +136,13 @@ export default function SignupPage() {
                   className="input-base"
                   placeholder="you@company.com"
                   required
+                  autoComplete="email"
                 />
               </div>
               <div>
-                <label className="block text-sm font-medium text-surface-700 dark:text-surface-300 mb-1.5">Password</label>
+                <label className="block text-sm font-medium text-surface-700 dark:text-surface-300 mb-1.5">
+                  Password
+                </label>
                 <div className="relative">
                   <input
                     type={showPassword ? 'text' : 'password'}
@@ -134,14 +152,25 @@ export default function SignupPage() {
                     placeholder="Min. 8 characters"
                     minLength={8}
                     required
+                    autoComplete="new-password"
                   />
-                  <button type="button" onClick={() => setShowPassword(!showPassword)} className="absolute right-3 top-1/2 -translate-y-1/2 text-surface-400">
-                    {showPassword ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
+                  <button
+                    type="button"
+                    onClick={() => setShowPassword(!showPassword)}
+                    className="absolute right-3 top-1/2 -translate-y-1/2 text-surface-400"
+                  >
+                    {showPassword
+                      ? <EyeOff className="w-4 h-4" />
+                      : <Eye className="w-4 h-4" />}
                   </button>
                 </div>
               </div>
 
-              <button type="submit" disabled={loading} className="btn-primary w-full justify-center py-3 mt-2">
+              <button
+                type="submit"
+                disabled={loading}
+                className="btn-primary w-full justify-center py-3 mt-2"
+              >
                 {loading ? <Loader2 className="w-4 h-4 animate-spin" /> : null}
                 {loading ? 'Creating account...' : 'Create account'}
                 {!loading && <ArrowRight className="w-4 h-4" />}
@@ -156,7 +185,12 @@ export default function SignupPage() {
 
             <p className="mt-5 text-center text-sm text-surface-500">
               Already have an account?{' '}
-              <Link href="/auth/login" className="text-brand-600 hover:text-brand-500 font-medium">Sign in</Link>
+              <Link
+                href="/auth/login"
+                className="text-brand-600 hover:text-brand-500 font-medium"
+              >
+                Sign in
+              </Link>
             </p>
           </div>
         </div>

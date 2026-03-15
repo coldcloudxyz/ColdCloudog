@@ -4,45 +4,63 @@ import { useState, useEffect } from 'react'
 import Link from 'next/link'
 import { usePathname, useRouter } from 'next/navigation'
 import {
-  Zap, LayoutDashboard, Users, Mail, Calendar, BarChart3,
-  Settings, LogOut, Menu, X, ChevronRight, Bell, Search,
-  Megaphone, Moon, Sun
+  Zap, LayoutDashboard, Users, Mail, BarChart3,
+  Settings, LogOut, Menu, ChevronRight, Bell,
+  Megaphone, Moon, Sun, Loader2
 } from 'lucide-react'
 import { createBrowserClient } from '@/lib/supabase'
 import { cn } from '@/lib/utils'
 import toast from 'react-hot-toast'
 
 const navItems = [
-  { href: '/dashboard',            icon: LayoutDashboard, label: 'Dashboard'   },
-  { href: '/dashboard/leads',      icon: Users,           label: 'Leads'       },
-  { href: '/dashboard/campaigns',  icon: Megaphone,       label: 'Campaigns'   },
-  { href: '/dashboard/emails',     icon: Mail,            label: 'Email Center'},
-  { href: '/dashboard/analytics',  icon: BarChart3,       label: 'Analytics'   },
-  { href: '/dashboard/settings',   icon: Settings,        label: 'Settings'    },
+  { href: '/dashboard',           icon: LayoutDashboard, label: 'Dashboard'    },
+  { href: '/dashboard/leads',     icon: Users,           label: 'Leads'        },
+  { href: '/dashboard/campaigns', icon: Megaphone,       label: 'Campaigns'    },
+  { href: '/dashboard/emails',    icon: Mail,            label: 'Email Center' },
+  { href: '/dashboard/analytics', icon: BarChart3,       label: 'Analytics'    },
+  { href: '/dashboard/settings',  icon: Settings,        label: 'Settings'     },
 ]
 
 export default function DashboardLayout({ children }: { children: React.ReactNode }) {
-  const pathname   = usePathname()
-  const router     = useRouter()
+  const pathname = usePathname()
+  const router   = useRouter()
+
   const [sidebarOpen, setSidebarOpen] = useState(false)
   const [darkMode,    setDarkMode]    = useState(false)
   const [user,        setUser]        = useState<any>(null)
-
-  // Use the session-aware browser client for auth only
-  const supabase = createBrowserClient()
+  const [authLoading, setAuthLoading] = useState(true)
 
   useEffect(() => {
+    const supabase = createBrowserClient()
+
+    // Get current session on mount
     supabase.auth.getUser().then(({ data }) => {
       if (data.user) {
         setUser(data.user)
       } else {
-        // Not logged in — redirect to login
         router.push('/auth/login')
       }
+      setAuthLoading(false)
     })
+
+    // Listen for auth state changes (logout from another tab, session expiry etc)
+    const { data: { subscription } } = supabase.auth.onAuthStateChange(
+      (event, session) => {
+        if (event === 'SIGNED_OUT' || !session) {
+          router.push('/auth/login')
+        }
+        if (event === 'SIGNED_IN' && session) {
+          setUser(session.user)
+        }
+      }
+    )
+
+    // Dark mode
     const dark = localStorage.getItem('darkMode') === 'true'
     setDarkMode(dark)
     if (dark) document.documentElement.classList.add('dark')
+
+    return () => subscription.unsubscribe()
   }, [])
 
   const toggleDark = () => {
@@ -53,13 +71,25 @@ export default function DashboardLayout({ children }: { children: React.ReactNod
   }
 
   const handleLogout = async () => {
+    const supabase = createBrowserClient()
     await supabase.auth.signOut()
     toast.success('Signed out')
     router.push('/')
   }
 
+  // Show spinner while checking auth
+  if (authLoading) {
+    return (
+      <div className="min-h-screen bg-surface-50 dark:bg-surface-950 flex items-center justify-center">
+        <Loader2 className="w-8 h-8 animate-spin text-brand-500" />
+      </div>
+    )
+  }
+
   const Sidebar = () => (
     <aside className="flex flex-col w-64 bg-white dark:bg-surface-900 border-r border-surface-100 dark:border-surface-800 h-full">
+
+      {/* Logo */}
       <div className="flex items-center gap-2.5 px-5 py-5 border-b border-surface-100 dark:border-surface-800">
         <div className="w-8 h-8 rounded-lg bg-gradient-to-br from-brand-500 to-cyan-500 flex items-center justify-center shadow-glow flex-shrink-0">
           <Zap className="w-4 h-4 text-white" strokeWidth={2.5} />
@@ -70,10 +100,12 @@ export default function DashboardLayout({ children }: { children: React.ReactNod
         </div>
       </div>
 
+      {/* Nav */}
       <nav className="flex-1 px-3 py-4 space-y-0.5 overflow-y-auto">
         {navItems.map(item => {
           const Icon   = item.icon
-          const active = pathname === item.href ||
+          const active =
+            pathname === item.href ||
             (item.href !== '/dashboard' && pathname.startsWith(item.href))
           return (
             <Link
@@ -90,8 +122,12 @@ export default function DashboardLayout({ children }: { children: React.ReactNod
         })}
       </nav>
 
+      {/* User + controls */}
       <div className="px-3 py-4 border-t border-surface-100 dark:border-surface-800 space-y-1">
-        <button onClick={toggleDark} className="nav-item nav-item-inactive w-full">
+        <button
+          onClick={toggleDark}
+          className="nav-item nav-item-inactive w-full"
+        >
           {darkMode ? <Sun className="w-4 h-4" /> : <Moon className="w-4 h-4" />}
           {darkMode ? 'Light mode' : 'Dark mode'}
         </button>
@@ -108,9 +144,11 @@ export default function DashboardLayout({ children }: { children: React.ReactNod
           </div>
           <div className="min-w-0">
             <div className="text-sm font-medium truncate">
-              {user?.user_metadata?.full_name ?? 'User'}
+              {user?.user_metadata?.full_name ?? user?.email?.split('@')[0] ?? 'User'}
             </div>
-            <div className="text-xs text-surface-400 truncate">{user?.email}</div>
+            <div className="text-xs text-surface-400 truncate">
+              {user?.email}
+            </div>
           </div>
         </div>
       </div>
@@ -119,19 +157,26 @@ export default function DashboardLayout({ children }: { children: React.ReactNod
 
   return (
     <div className="flex h-screen bg-surface-50 dark:bg-surface-950 overflow-hidden">
+
+      {/* Desktop sidebar */}
       <div className="hidden lg:flex flex-shrink-0">
         <Sidebar />
       </div>
 
+      {/* Mobile sidebar */}
       {sidebarOpen && (
         <div className="lg:hidden fixed inset-0 z-50 flex">
-          <div className="fixed inset-0 bg-black/50" onClick={() => setSidebarOpen(false)} />
+          <div
+            className="fixed inset-0 bg-black/50"
+            onClick={() => setSidebarOpen(false)}
+          />
           <div className="relative w-64 flex-shrink-0 animate-slide-in-right">
             <Sidebar />
           </div>
         </div>
       )}
 
+      {/* Main */}
       <div className="flex-1 flex flex-col min-w-0 overflow-hidden">
         <header className="flex-shrink-0 h-14 bg-white dark:bg-surface-900 border-b border-surface-100 dark:border-surface-800 flex items-center gap-4 px-4 sm:px-6">
           <button
@@ -140,30 +185,14 @@ export default function DashboardLayout({ children }: { children: React.ReactNod
           >
             <Menu className="w-5 h-5" />
           </button>
-
-          <div className="flex-1 flex items-center gap-3">
-            <div className="relative hidden sm:block w-72">
-              <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-surface-400" />
-              <input
-                type="text"
-                placeholder="Search leads, campaigns..."
-                className="input-base pl-9 py-2 text-sm"
-              />
-            </div>
-          </div>
-
-          <div className="flex items-center gap-2">
-            <button className="relative p-2 rounded-lg hover:bg-surface-100 dark:hover:bg-surface-800 text-surface-500">
-              <Bell className="w-4 h-4" />
-              <span className="absolute top-1.5 right-1.5 w-1.5 h-1.5 rounded-full bg-brand-500" />
-            </button>
-          </div>
+          <div className="flex-1" />
+          <button className="relative p-2 rounded-lg hover:bg-surface-100 dark:hover:bg-surface-800 text-surface-500">
+            <Bell className="w-4 h-4" />
+          </button>
         </header>
 
         <main className="flex-1 overflow-y-auto">
-          <div className="page-enter">
-            {children}
-          </div>
+          {children}
         </main>
       </div>
     </div>
