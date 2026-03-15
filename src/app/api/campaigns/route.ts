@@ -1,140 +1,94 @@
 import { NextRequest, NextResponse } from 'next/server'
-import { createAdminClient } from '@/lib/supabase'
+import { cookies } from 'next/headers'
+import { createRouteHandlerClient } from '@supabase/auth-helpers-nextjs'
 
 export async function GET(req: NextRequest) {
   try {
-    const supabase = createAdminClient()
-    const { searchParams } = new URL(req.url)
+    const supabase = createRouteHandlerClient({ cookies })
 
-    const search = searchParams.get('search')
-    const limit = Math.min(parseInt(searchParams.get('limit') || '50'), 200)
-    const offset = parseInt(searchParams.get('offset') || '0')
-
-    let query = supabase
-      .from('campaigns')
-      .select(`
-        *,
-        leads:leads(count)
-      `, { count: 'exact' })
-      .order('created_at', { ascending: false })
-      .range(offset, offset + limit - 1)
-
-    if (search) {
-      query = query.ilike('name', `%${search}%`)
+    const { data: { user }, error: authErr } = await supabase.auth.getUser()
+    if (authErr || !user) {
+      return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
     }
 
-    const { data, error, count } = await query
+    const { data, error } = await supabase
+      .from('campaigns')
+      .select('*')
+      .eq('user_id', user.id)
+      .order('created_at', { ascending: false })
+
     if (error) throw error
 
-    return NextResponse.json({
-      campaigns: data,
-      total: count,
-      limit,
-      offset
-    })
-
-  } catch (error: any) {
-    console.error('Campaigns GET error:', error)
-
-    return NextResponse.json(
-      { error: error.message || 'Failed to fetch campaigns' },
-      { status: 500 }
-    )
+    return NextResponse.json({ campaigns: data ?? [] })
+  } catch (e: any) {
+    return NextResponse.json({ error: e.message }, { status: 500 })
   }
 }
 
 export async function POST(req: NextRequest) {
   try {
-    const supabase = createAdminClient()
-    const body = await req.json()
+    const supabase = createRouteHandlerClient({ cookies })
 
-    if (!body.name) {
-      return NextResponse.json(
-        { error: 'Campaign name is required' },
-        { status: 400 }
-      )
+    const { data: { user }, error: authErr } = await supabase.auth.getUser()
+    if (authErr || !user) {
+      return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
     }
+
+    const body = await req.json()
 
     const { data, error } = await supabase
       .from('campaigns')
       .insert({
-        name: body.name,
-        description: body.description || null,
-        status: body.status || 'draft',
-        calendly_link: body.calendly_link || null,
-        send_schedule: body.send_schedule || null,
-        created_at: new Date().toISOString(),
-        updated_at: new Date().toISOString()
+        name:          body.name,
+        description:   body.description   ?? null,
+        calendly_link: body.calendly_link ?? null,
+        campaign_goal: body.campaign_goal ?? null,
+        status:        'draft',
+        total_leads:   0,
+        emails_sent:   0,
+        replies:       0,
+        meetings_booked: 0,
+        user_id:       user.id,
       })
       .select()
       .single()
 
     if (error) throw error
 
-    return NextResponse.json(
-      { campaign: data },
-      { status: 201 }
-    )
-
-  } catch (error: any) {
-    console.error('Campaign POST error:', error)
-
-    return NextResponse.json(
-      { error: error.message || 'Failed to create campaign' },
-      { status: 500 }
-    )
+    return NextResponse.json({ campaign: data }, { status: 201 })
+  } catch (e: any) {
+    return NextResponse.json({ error: e.message }, { status: 500 })
   }
 }
 
 export async function PUT(req: NextRequest) {
   try {
-    const supabase = createAdminClient()
-    const body = await req.json()
+    const supabase = createRouteHandlerClient({ cookies })
 
-    const { id, leads, ...updates } = body
-
-    if (!id) {
-      return NextResponse.json(
-        { error: 'Campaign ID required' },
-        { status: 400 }
-      )
+    const { data: { user }, error: authErr } = await supabase.auth.getUser()
+    if (authErr || !user) {
+      return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
     }
+
+    const { id, ...updates } = await req.json()
+    if (!id) {
+      return NextResponse.json({ error: 'Campaign ID required' }, { status: 400 })
+    }
+
+    delete updates.user_id
 
     const { data, error } = await supabase
       .from('campaigns')
-      .update({
-        ...updates,
-        updated_at: new Date().toISOString()
-      })
+      .update({ ...updates, updated_at: new Date().toISOString() })
       .eq('id', id)
+      .eq('user_id', user.id)
       .select()
       .single()
 
     if (error) throw error
 
-    // Attach leads to campaign if provided
-    if (Array.isArray(leads) && leads.length > 0) {
-      try {
-        await supabase
-          .from('leads')
-          .update({
-            campaign_id: id,
-            updated_at: new Date().toISOString()
-          })
-          .in('id', leads)
-      } catch (e) {
-        console.log('Lead campaign assignment failed')
-      }
-    }
-
     return NextResponse.json({ campaign: data })
-
-  } catch (error: any) {
-    console.error('Campaign PUT error:', error)
-
-    return NextResponse.json(
-      { error: error.message || 'Failed to update campaign' },
-      { status: 500 }
-    )
+  } catch (e: any) {
+    return NextResponse.json({ error: e.message }, { status: 500 })
   }
 }
