@@ -1,16 +1,11 @@
 import { NextRequest, NextResponse } from 'next/server'
-import { createRouteHandlerClient } from '@supabase/auth-helpers-nextjs'
 import { cookies } from 'next/headers'
-
-// Every handler creates a route-handler Supabase client so the
-// session cookie is read automatically.  RLS then enforces that
-// the authenticated user can only touch their own rows.
+import { createRouteHandlerClient } from '@supabase/auth-helpers-nextjs'
 
 export async function GET(req: NextRequest) {
   try {
     const supabase = createRouteHandlerClient({ cookies })
 
-    // Confirm the caller is signed in
     const { data: { user }, error: authErr } = await supabase.auth.getUser()
     if (authErr || !user) {
       return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
@@ -25,7 +20,7 @@ export async function GET(req: NextRequest) {
     let query = supabase
       .from('leads')
       .select('*', { count: 'exact' })
-      .eq('user_id', user.id)           // ← scope to this user
+      .eq('user_id', user.id)
       .order('created_at', { ascending: false })
       .range(offset, offset + limit - 1)
 
@@ -52,28 +47,39 @@ export async function POST(req: NextRequest) {
     }
 
     const body = await req.json()
-
-    // Accept a single object or an array (CSV bulk import)
     const incoming = Array.isArray(body) ? body : [body]
 
-    const toInsert = incoming.map(lead => ({
-      name:        lead.name,
-      company:     lead.company,
-      email:       lead.email,
-      website:     lead.website     ?? null,
-      linkedin:    lead.linkedin    ?? null,
-      campaign_id: lead.campaign_id ?? null,
-      status:      lead.status      ?? 'new',
-      notes:       lead.notes       ?? null,
-      user_id:     user.id,          // ← always stamp with the caller's id
-    }))
+    if (incoming.length === 0) {
+      return NextResponse.json({ error: 'No leads provided' }, { status: 400 })
+    }
+
+    const toInsert = incoming.map((lead: any, i: number) => {
+      if (!lead.name?.trim())    throw new Error(`Row ${i + 1}: name is required`)
+      if (!lead.email?.trim())   throw new Error(`Row ${i + 1}: email is required`)
+      if (!lead.company?.trim()) throw new Error(`Row ${i + 1}: company is required`)
+
+      return {
+        name:        lead.name.trim(),
+        company:     lead.company.trim(),
+        email:       lead.email.trim().toLowerCase(),
+        website:     lead.website     ?? null,
+        linkedin:    lead.linkedin    ?? null,
+        campaign_id: lead.campaign_id ?? null,
+        status:      lead.status      ?? 'new',
+        notes:       lead.notes       ?? null,
+        user_id:     user.id,
+      }
+    })
 
     const { data, error } = await supabase
       .from('leads')
       .insert(toInsert)
       .select()
 
-    if (error) throw error
+    if (error) {
+      console.error('[leads POST] insert error:', error.message)
+      throw error
+    }
 
     return NextResponse.json({ leads: data ?? [] }, { status: 201 })
   } catch (e: any) {
@@ -96,13 +102,13 @@ export async function PUT(req: NextRequest) {
       return NextResponse.json({ error: 'Lead ID required' }, { status: 400 })
     }
 
-    // The .eq('user_id', user.id) ensures users cannot update
-    // another user's lead even if they guess the UUID.
+    delete updates.user_id
+
     const { data, error } = await supabase
       .from('leads')
       .update({ ...updates, updated_at: new Date().toISOString() })
       .eq('id', id)
-      .eq('user_id', user.id)          // ← ownership check
+      .eq('user_id', user.id)
       .select()
       .single()
 
@@ -134,7 +140,7 @@ export async function DELETE(req: NextRequest) {
       .from('leads')
       .delete()
       .eq('id', id)
-      .eq('user_id', user.id)          // ← ownership check
+      .eq('user_id', user.id)
 
     if (error) throw error
 

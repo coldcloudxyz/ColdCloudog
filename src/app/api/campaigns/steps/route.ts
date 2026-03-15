@@ -2,9 +2,6 @@ import { NextRequest, NextResponse } from 'next/server'
 import { cookies } from 'next/headers'
 import { createRouteHandlerClient } from '@supabase/auth-helpers-nextjs'
 
-// GET  /api/campaigns/steps?campaign_id=xxx  — fetch steps for a campaign
-// PUT  body: { id, subject, email_template } — update a single step
-
 export async function GET(req: NextRequest) {
   try {
     const supabase = createRouteHandlerClient({ cookies })
@@ -30,6 +27,7 @@ export async function GET(req: NextRequest) {
 
     return NextResponse.json({ steps: data ?? [] })
   } catch (e: any) {
+    console.error('[campaigns/steps GET]', e.message)
     return NextResponse.json({ error: e.message }, { status: 500 })
   }
 }
@@ -64,6 +62,7 @@ export async function PUT(req: NextRequest) {
 
     return NextResponse.json({ step: data })
   } catch (e: any) {
+    console.error('[campaigns/steps PUT]', e.message)
     return NextResponse.json({ error: e.message }, { status: 500 })
   }
 }

@@ -3,8 +3,6 @@ import { cookies } from 'next/headers'
 import { createRouteHandlerClient } from '@supabase/auth-helpers-nextjs'
 import OpenAI from 'openai'
 
-// ── Helpers ───────────────────────────────────────────────────
-
 function buildPrompt(
   goal: string,
   campaignName: string,
@@ -66,13 +64,6 @@ Respond ONLY with valid JSON in this exact shape — no markdown, no extra text:
 }`
 }
 
-// ── POST /api/campaigns/build ─────────────────────────────────
-// Body: { campaign_id, goal, campaign_name, qa }
-// 1. Saves Q&A to campaign_inputs
-// 2. Calls OpenAI to generate 3 emails
-// 3. Saves emails to campaign_steps
-// 4. Returns the generated steps
-
 export async function POST(req: NextRequest) {
   try {
     const supabase = createRouteHandlerClient({ cookies })
@@ -99,7 +90,7 @@ export async function POST(req: NextRequest) {
       )
     }
 
-    // ── 1. Verify campaign belongs to this user ───────────────
+    // Verify campaign belongs to this user
     const { data: campaign, error: campErr } = await supabase
       .from('campaigns')
       .select('id, name')
@@ -111,20 +102,17 @@ export async function POST(req: NextRequest) {
       return NextResponse.json({ error: 'Campaign not found' }, { status: 404 })
     }
 
-    // ── 2. Save Q&A inputs ────────────────────────────────────
-    const filteredQA = qa.filter(
-      (item: any) => item.answer?.trim()
-    )
+    // Save Q&A inputs
+    const filteredQA = qa.filter((item: any) => item.answer?.trim())
 
     if (filteredQA.length > 0) {
-      // Delete any previous inputs for this campaign first
       await supabase
         .from('campaign_inputs')
         .delete()
         .eq('campaign_id', campaign_id)
         .eq('user_id', user.id)
 
-      const { error: inputErr } = await supabase
+      await supabase
         .from('campaign_inputs')
         .insert(
           filteredQA.map((item: any) => ({
@@ -134,20 +122,16 @@ export async function POST(req: NextRequest) {
             answer:   item.answer.trim(),
           }))
         )
-
-      if (inputErr) {
-        console.error('[campaigns/build] input save error:', inputErr.message)
-      }
     }
 
-    // ── 3. Update campaign goal ───────────────────────────────
+    // Update campaign goal
     await supabase
       .from('campaigns')
       .update({ campaign_goal: goal })
       .eq('id', campaign_id)
       .eq('user_id', user.id)
 
-    // ── 4. Generate email sequence with OpenAI ────────────────
+    // Generate emails with OpenAI
     const openai = new OpenAI({ apiKey })
 
     const completion = await openai.chat.completions.create({
@@ -160,7 +144,6 @@ export async function POST(req: NextRequest) {
     const raw = completion.choices[0]?.message?.content?.trim()
     if (!raw) throw new Error('OpenAI returned an empty response')
 
-    // Strip any accidental markdown fences
     const cleaned = raw
       .replace(/^```json\s*/i, '')
       .replace(/^```\s*/i, '')
@@ -171,7 +154,7 @@ export async function POST(req: NextRequest) {
     try {
       parsed = JSON.parse(cleaned)
     } catch {
-      console.error('[campaigns/build] JSON parse failed. Raw output:', raw)
+      console.error('[campaigns/build] JSON parse failed:', raw)
       throw new Error('AI returned malformed JSON. Please try again.')
     }
 
@@ -179,26 +162,25 @@ export async function POST(req: NextRequest) {
       throw new Error('AI did not return any emails')
     }
 
-    // ── 5. Save generated steps ───────────────────────────────
-    // Delete any previous steps for this campaign first
+    // Delete old steps and save new ones
     await supabase
       .from('campaign_steps')
       .delete()
       .eq('campaign_id', campaign_id)
       .eq('user_id', user.id)
 
-    const stepsToInsert = parsed.emails.map((e: any) => ({
-      campaign_id,
-      user_id:        user.id,
-      step_number:    e.step_number,
-      delay_days:     e.delay_days,
-      subject:        e.subject,
-      email_template: e.email_template,
-    }))
-
     const { data: steps, error: stepsErr } = await supabase
       .from('campaign_steps')
-      .insert(stepsToInsert)
+      .insert(
+        parsed.emails.map((e: any) => ({
+          campaign_id,
+          user_id:        user.id,
+          step_number:    e.step_number,
+          delay_days:     e.delay_days,
+          subject:        e.subject,
+          email_template: e.email_template,
+        }))
+      )
       .select()
 
     if (stepsErr) throw stepsErr

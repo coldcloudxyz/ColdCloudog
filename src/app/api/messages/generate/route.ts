@@ -1,144 +1,106 @@
 import { NextRequest, NextResponse } from 'next/server'
+import { cookies } from 'next/headers'
+import { createRouteHandlerClient } from '@supabase/auth-helpers-nextjs'
 import OpenAI from 'openai'
-import { createAdminClient } from '@/lib/supabase'
 
 export async function POST(req: NextRequest) {
   try {
+    const supabase = createRouteHandlerClient({ cookies })
+
+    const { data: { user }, error: authErr } = await supabase.auth.getUser()
+    if (authErr || !user) {
+      return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
+    }
+
     const { leadId, website, company, name } = await req.json()
 
     if (!company || !name) {
       return NextResponse.json(
-        { error: 'Missing required fields' },
+        { error: 'Missing required fields: company and name' },
         { status: 400 }
       )
     }
 
-    const apiKey = process.env.OPENROUTER_API_KEY
-
+    const apiKey = process.env.OPENAI_API_KEY
     if (!apiKey) {
       return NextResponse.json(
-        { error: 'OpenRouter API key not configured' },
+        { error: 'OpenAI API key is not configured' },
         { status: 500 }
       )
     }
 
-    const openai = new OpenAI({
-      apiKey,
-      baseURL: 'https://openrouter.ai/api/v1'
-    })
-
-    // =========================
-    // Fetch website for context
-    // =========================
-
+    // Scrape website for context
     let websiteContext = ''
-
     if (website) {
       try {
         const res = await fetch(website, {
           headers: { 'User-Agent': 'Mozilla/5.0' },
-          signal: AbortSignal.timeout(7000)
+          signal:  AbortSignal.timeout(5000),
         })
-
         const html = await res.text()
-
         websiteContext = html
           .replace(/<script[^>]*>[\s\S]*?<\/script>/gi, '')
           .replace(/<style[^>]*>[\s\S]*?<\/style>/gi, '')
           .replace(/<[^>]+>/g, ' ')
           .replace(/\s+/g, ' ')
           .trim()
-          .slice(0, 4000)
-
-      } catch (e) {
-        console.log('Website fetch failed')
+          .slice(0, 2000)
+      } catch {
+        // Continue without website context
       }
     }
 
-    // =========================
-    // Prompt
-    // =========================
+    const openai = new OpenAI({ apiKey })
 
-    const prompt = `
-You are a world-class B2B cold email copywriter.
+    const prompt = `You are an expert cold email copywriter. Write a short, personalized B2B outreach email.
 
-Write a highly personalized outreach email.
+Target:
+- Name: ${name}
+- Company: ${company}
+- Website: ${website ?? 'Not provided'}
+${websiteContext ? `\nWebsite content excerpt:\n${websiteContext}` : ''}
 
-Target lead:
-Name: ${name}
-Company: ${company}
-Website: ${website || 'Not provided'}
+Requirements:
+1. Reference something specific about their company
+2. Keep it under 100 words
+3. Be conversational and human — not salesy
+4. End with a soft CTA for a 15-minute call
+5. Never start with "I hope this email finds you well"
+6. Sign off with [Your Name]
 
-${websiteContext ? `Website content context:\n${websiteContext}` : ''}
-
-Instructions:
-• Mention something specific about their company
-• Use the website context if available
-• Sound natural and human
-• No generic phrases
-• Keep the email under 90 words
-• Write like a founder reaching out
-• Avoid buzzwords
-
-Goal:
-Start a friendly conversation and ask if they would be open to a quick 15-minute call.
-
-Sign off with:
-
-Sahil  
-Founder, ColdCloud
-
-Output ONLY the email body.
-`
-
-    // =========================
-    // AI Generation
-    // =========================
+Write ONLY the email body. No subject line, no extra commentary.`
 
     const completion = await openai.chat.completions.create({
-      model: 'meta-llama/llama-3.1-70b-instruct',
-      messages: [
-        { role: 'system', content: 'You write extremely personalized cold emails.' },
-        { role: 'user', content: prompt }
-      ],
-      max_tokens: 300,
-      temperature: 0.9
+      model:       'gpt-4o-mini',
+      messages:    [{ role: 'user', content: prompt }],
+      max_tokens:  300,
+      temperature: 0.7,
     })
 
     const message = completion.choices[0]?.message?.content?.trim()
+    if (!message) throw new Error('OpenAI returned an empty response')
 
-    if (!message) {
-      throw new Error('No message generated')
-    }
-
-    // =========================
-    // Save to Supabase
-    // =========================
-
+    // Save back to the lead row — scoped to this user
     if (leadId) {
-      try {
-        const supabase = createAdminClient()
+      const { error: updateErr } = await supabase
+        .from('leads')
+        .update({
+          personalized_message: message,
+          updated_at:           new Date().toISOString(),
+        })
+        .eq('id', leadId)
+        .eq('user_id', user.id)
 
-        await supabase
-          .from('leads')
-          .update({
-            personalized_message: message,
-            updated_at: new Date().toISOString()
-          })
-          .eq('id', leadId)
-
-      } catch (e) {
-        console.log('Supabase save failed')
+      if (updateErr) {
+        console.warn('[messages/generate] DB update failed:', updateErr.message)
       }
     }
 
     return NextResponse.json({ message })
-
-  } catch (error: any) {
-    console.error('Message generation error:', error)
-
+  } catch (e: any) {
+    console.error('[messages/generate]', e.message)
     return NextResponse.json(
-      { error: error.message || 'Failed to generate message' },
+      { error: e.message ?? 'Failed to generate message' },
       { status: 500 }
     )
   }

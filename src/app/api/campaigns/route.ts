@@ -21,6 +21,7 @@ export async function GET(req: NextRequest) {
 
     return NextResponse.json({ campaigns: data ?? [] })
   } catch (e: any) {
+    console.error('[campaigns GET]', e.message)
     return NextResponse.json({ error: e.message }, { status: 500 })
   }
 }
@@ -36,27 +37,35 @@ export async function POST(req: NextRequest) {
 
     const body = await req.json()
 
+    if (!body.name?.trim()) {
+      return NextResponse.json({ error: 'Campaign name is required' }, { status: 400 })
+    }
+
     const { data, error } = await supabase
       .from('campaigns')
       .insert({
-        name:          body.name,
-        description:   body.description   ?? null,
-        calendly_link: body.calendly_link ?? null,
-        campaign_goal: body.campaign_goal ?? null,
-        status:        'draft',
-        total_leads:   0,
-        emails_sent:   0,
-        replies:       0,
+        name:            body.name.trim(),
+        description:     body.description     ?? null,
+        calendly_link:   body.calendly_link   ?? null,
+        campaign_goal:   body.campaign_goal   ?? null,
+        status:          'draft',
+        total_leads:     0,
+        emails_sent:     0,
+        replies:         0,
         meetings_booked: 0,
-        user_id:       user.id,
+        user_id:         user.id,
       })
       .select()
       .single()
 
-    if (error) throw error
+    if (error) {
+      console.error('[campaigns POST]', error.message)
+      throw error
+    }
 
     return NextResponse.json({ campaign: data }, { status: 201 })
   } catch (e: any) {
+    console.error('[campaigns POST]', e.message)
     return NextResponse.json({ error: e.message }, { status: 500 })
   }
 }
@@ -89,6 +98,7 @@ export async function PUT(req: NextRequest) {
 
     return NextResponse.json({ campaign: data })
   } catch (e: any) {
+    console.error('[campaigns PUT]', e.message)
     return NextResponse.json({ error: e.message }, { status: 500 })
   }
 }
