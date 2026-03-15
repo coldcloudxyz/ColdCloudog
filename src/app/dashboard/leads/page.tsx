@@ -8,7 +8,6 @@ import {
 import { useDropzone } from 'react-dropzone'
 import Papa from 'papaparse'
 import toast from 'react-hot-toast'
-import { supabase } from '@/lib/supabase'
 import { cn, getStatusColor, getStatusLabel, formatRelativeTime } from '@/lib/utils'
 import type { Lead, LeadStatus } from '@/types'
 
@@ -21,24 +20,29 @@ const statusOptions: LeadStatus[] = [
 // ─────────────────────────────────────────────
 
 export default function LeadsPage() {
-  const [leads, setLeads] = useState<Lead[]>([])
-  const [loading, setLoading] = useState(true)
-  const [search, setSearch] = useState('')
-  const [statusFilter, setStatusFilter] = useState<string>('all')
-  const [showAddModal, setShowAddModal] = useState(false)
-  const [showLeadDetail, setShowLeadDetail] = useState<Lead | null>(null)
+  const [leads,            setLeads]            = useState<Lead[]>([])
+  const [loading,          setLoading]          = useState(true)
+  const [search,           setSearch]           = useState('')
+  const [statusFilter,     setStatusFilter]     = useState<string>('all')
+  const [showAddModal,     setShowAddModal]     = useState(false)
+  const [showLeadDetail,   setShowLeadDetail]   = useState<Lead | null>(null)
   const [generatingMessage, setGeneratingMessage] = useState<string | null>(null)
-  const [sendingEmail, setSendingEmail] = useState<string | null>(null)
+  const [sendingEmail,     setSendingEmail]     = useState<string | null>(null)
 
-  useEffect(() => {
-    loadLeads()
-  }, [])
+  useEffect(() => { loadLeads() }, [])
+
+  // ── All data fetching goes through API routes ──────────────
+  // The API routes use createRouteHandlerClient which reads the
+  // session cookie and passes the JWT to Supabase automatically.
+  // RLS then filters rows to the logged-in user only.
 
   async function loadLeads() {
     setLoading(true)
     try {
-      // API route reads the session cookie and scopes to user_id
-      const res = await fetch('/api/leads')
+      const res = await fetch('/api/leads', {
+        // Include cookies so the API route can read the session
+        credentials: 'same-origin',
+      })
       if (!res.ok) {
         const err = await res.json()
         throw new Error(err.error ?? 'Failed to fetch leads')
@@ -62,13 +66,13 @@ export default function LeadsPage() {
     return matchSearch && matchStatus
   })
 
-  // Calls /api/messages/generate — OpenAI reads the website
   async function generateMessage(lead: Lead) {
     setGeneratingMessage(lead.id)
     try {
       const res = await fetch('/api/messages/generate', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        method:      'POST',
+        credentials: 'same-origin',
+        headers:     { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           leadId:  lead.id,
           website: lead.website,
@@ -84,13 +88,12 @@ export default function LeadsPage() {
       if (showLeadDetail?.id === lead.id) setShowLeadDetail(updated)
       toast.success('AI message generated!')
     } catch (e: any) {
-      toast.error(e.message ?? 'Failed to generate — you can type a message manually.')
+      toast.error(e.message ?? 'Failed to generate — you can type manually.')
     } finally {
       setGeneratingMessage(null)
     }
   }
 
-  // Calls /api/emails/send — sends via Resend
   async function sendEmail(lead: Lead) {
     if (!lead.personalized_message?.trim()) {
       toast.error('Write or generate a message first.')
@@ -99,8 +102,9 @@ export default function LeadsPage() {
     setSendingEmail(lead.id)
     try {
       const res = await fetch('/api/emails/send', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        method:      'POST',
+        credentials: 'same-origin',
+        headers:     { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           leadId:  lead.id,
           email:   lead.email,
@@ -113,7 +117,7 @@ export default function LeadsPage() {
 
       const updated: Lead = {
         ...lead,
-        status: 'contacted' as LeadStatus,
+        status:        'contacted' as LeadStatus,
         email_sent_at: new Date().toISOString(),
       }
       setLeads(prev => prev.map(l => (l.id === lead.id ? updated : l)))
@@ -129,7 +133,10 @@ export default function LeadsPage() {
   async function deleteLead(id: string) {
     if (!confirm('Delete this lead?')) return
     try {
-      const res = await fetch(`/api/leads?id=${id}`, { method: 'DELETE' })
+      const res = await fetch(`/api/leads?id=${id}`, {
+        method:      'DELETE',
+        credentials: 'same-origin',
+      })
       if (!res.ok) {
         const err = await res.json()
         throw new Error(err.error ?? 'Delete failed')
@@ -145,8 +152,9 @@ export default function LeadsPage() {
   async function handleCSVImport(rows: any[]) {
     try {
       const res = await fetch('/api/leads', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        method:      'POST',
+        credentials: 'same-origin',
+        headers:     { 'Content-Type': 'application/json' },
         body: JSON.stringify(rows),
       })
       const data = await res.json()
@@ -246,24 +254,12 @@ export default function LeadsPage() {
             <table className="w-full">
               <thead>
                 <tr className="border-b border-surface-100 dark:border-surface-800">
-                  <th className="text-left px-4 py-3 text-xs font-semibold text-surface-500 uppercase tracking-wider">
-                    Lead
-                  </th>
-                  <th className="text-left px-4 py-3 text-xs font-semibold text-surface-500 uppercase tracking-wider hidden md:table-cell">
-                    Company
-                  </th>
-                  <th className="text-left px-4 py-3 text-xs font-semibold text-surface-500 uppercase tracking-wider hidden lg:table-cell">
-                    Email
-                  </th>
-                  <th className="text-left px-4 py-3 text-xs font-semibold text-surface-500 uppercase tracking-wider">
-                    Status
-                  </th>
-                  <th className="text-left px-4 py-3 text-xs font-semibold text-surface-500 uppercase tracking-wider hidden sm:table-cell">
-                    Added
-                  </th>
-                  <th className="text-right px-4 py-3 text-xs font-semibold text-surface-500 uppercase tracking-wider">
-                    Actions
-                  </th>
+                  <th className="text-left px-4 py-3 text-xs font-semibold text-surface-500 uppercase tracking-wider">Lead</th>
+                  <th className="text-left px-4 py-3 text-xs font-semibold text-surface-500 uppercase tracking-wider hidden md:table-cell">Company</th>
+                  <th className="text-left px-4 py-3 text-xs font-semibold text-surface-500 uppercase tracking-wider hidden lg:table-cell">Email</th>
+                  <th className="text-left px-4 py-3 text-xs font-semibold text-surface-500 uppercase tracking-wider">Status</th>
+                  <th className="text-left px-4 py-3 text-xs font-semibold text-surface-500 uppercase tracking-wider hidden sm:table-cell">Added</th>
+                  <th className="text-right px-4 py-3 text-xs font-semibold text-surface-500 uppercase tracking-wider">Actions</th>
                 </tr>
               </thead>
               <tbody className="divide-y divide-surface-50 dark:divide-surface-800">
@@ -272,9 +268,7 @@ export default function LeadsPage() {
                     <td colSpan={6} className="py-16 text-center text-surface-400">
                       <Users className="w-10 h-10 mx-auto mb-3 opacity-40" />
                       <p className="font-medium">
-                        {leads.length === 0
-                          ? 'No leads yet'
-                          : 'No leads match filters'}
+                        {leads.length === 0 ? 'No leads yet' : 'No leads match filters'}
                       </p>
                       <p className="text-sm mt-1">
                         {leads.length === 0
@@ -297,9 +291,7 @@ export default function LeadsPage() {
                           </div>
                           <div>
                             <p className="font-medium text-sm">{lead.name}</p>
-                            <p className="text-xs text-surface-400 md:hidden">
-                              {lead.company}
-                            </p>
+                            <p className="text-xs text-surface-400 md:hidden">{lead.company}</p>
                           </div>
                         </div>
                       </td>
@@ -422,7 +414,7 @@ function CSVUploader({ onImport }: { onImport: (rows: any[]) => void }) {
       if (!files[0]) return
       setUploading(true)
       Papa.parse(files[0], {
-        header: true,
+        header:         true,
         skipEmptyLines: true,
         complete: results => {
           const rows = (results.data as any[])
@@ -453,7 +445,7 @@ function CSVUploader({ onImport }: { onImport: (rows: any[]) => void }) {
 
   const { getRootProps, getInputProps } = useDropzone({
     onDrop,
-    accept: { 'text/csv': ['.csv'] },
+    accept:   { 'text/csv': ['.csv'] },
     maxFiles: 1,
   })
 
@@ -479,7 +471,7 @@ function AddLeadModal({
   onAdd,
 }: {
   onClose: () => void
-  onAdd: (lead: Lead) => void
+  onAdd:   (lead: Lead) => void
 }) {
   const [form, setForm] = useState({
     name: '', company: '', email: '', website: '', linkedin: '',
@@ -491,8 +483,9 @@ function AddLeadModal({
     setSaving(true)
     try {
       const res = await fetch('/api/leads', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        method:      'POST',
+        credentials: 'same-origin',
+        headers:     { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           name:     form.name,
           company:  form.company,
@@ -500,6 +493,7 @@ function AddLeadModal({
           website:  form.website  || null,
           linkedin: form.linkedin || null,
           status:   'new',
+          // user_id is added by the API route — never send it from the frontend
         }),
       })
       const data = await res.json()
@@ -573,13 +567,13 @@ function LeadDetailModal({
   generating,
   sending,
 }: {
-  lead: Lead
-  onClose: () => void
+  lead:              Lead
+  onClose:           () => void
   onGenerateMessage: () => void
-  onSendEmail: () => void
-  onMessageChange: (msg: string) => void
-  generating: boolean
-  sending: boolean
+  onSendEmail:       () => void
+  onMessageChange:   (msg: string) => void
+  generating:        boolean
+  sending:           boolean
 }) {
   const hasMessage = !!lead.personalized_message?.trim()
 
@@ -751,7 +745,6 @@ function LeadDetailModal({
             to get started
           </p>
         )}
-
       </div>
     </div>
   )
