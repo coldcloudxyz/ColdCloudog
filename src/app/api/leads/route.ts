@@ -1,46 +1,21 @@
 import { NextRequest, NextResponse } from 'next/server'
-import { createServerClient } from '@supabase/ssr'
-import { cookies } from 'next/headers'
-
-function createClient() {
-  const cookieStore = cookies()
-  return createServerClient(
-    process.env.NEXT_PUBLIC_SUPABASE_URL!,
-    process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!,
-    {
-      cookies: {
-        getAll() {
-          return cookieStore.getAll()
-        },
-        setAll(cookiesToSet) {
-          cookiesToSet.forEach(({ name, value, options }) =>
-            cookieStore.set(name, value, options)
-          )
-        },
-      },
-    }
-  )
-}
+import { requireAuth } from '@/lib/api-client'
 
 export async function GET(req: NextRequest) {
+  const { supabase, user, response } = await requireAuth()
+  if (response) return response
+
   try {
-    const supabase = createClient()
-
-    const { data: { user }, error: authErr } = await supabase.auth.getUser()
-    if (authErr || !user) {
-      return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
-    }
-
     const { searchParams } = new URL(req.url)
     const status   = searchParams.get('status')
     const campaign = searchParams.get('campaign')
-    const limit    = parseInt(searchParams.get('limit') ?? '200')
+    const limit    = parseInt(searchParams.get('limit')  ?? '200')
     const offset   = parseInt(searchParams.get('offset') ?? '0')
 
-    let query = supabase
+    let query = supabase!
       .from('leads')
       .select('*', { count: 'exact' })
-      .eq('user_id', user.id)
+      .eq('user_id', user!.id)
       .order('created_at', { ascending: false })
       .range(offset, offset + limit - 1)
 
@@ -58,15 +33,11 @@ export async function GET(req: NextRequest) {
 }
 
 export async function POST(req: NextRequest) {
+  const { supabase, user, response } = await requireAuth()
+  if (response) return response
+
   try {
-    const supabase = createClient()
-
-    const { data: { user }, error: authErr } = await supabase.auth.getUser()
-    if (authErr || !user) {
-      return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
-    }
-
-    const body = await req.json()
+    const body     = await req.json()
     const incoming = Array.isArray(body) ? body : [body]
 
     if (incoming.length === 0) {
@@ -77,7 +48,6 @@ export async function POST(req: NextRequest) {
       if (!lead.name?.trim())    throw new Error(`Row ${i + 1}: name is required`)
       if (!lead.email?.trim())   throw new Error(`Row ${i + 1}: email is required`)
       if (!lead.company?.trim()) throw new Error(`Row ${i + 1}: company is required`)
-
       return {
         name:        lead.name.trim(),
         company:     lead.company.trim(),
@@ -87,17 +57,16 @@ export async function POST(req: NextRequest) {
         campaign_id: lead.campaign_id ?? null,
         status:      lead.status      ?? 'new',
         notes:       lead.notes       ?? null,
-        user_id:     user.id,
+        user_id:     user!.id,
       }
     })
 
-    const { data, error } = await supabase
+    const { data, error } = await supabase!
       .from('leads')
       .insert(toInsert)
       .select()
 
     if (error) throw error
-
     return NextResponse.json({ leads: data ?? [] }, { status: 201 })
   } catch (e: any) {
     console.error('[leads POST]', e.message)
@@ -106,31 +75,24 @@ export async function POST(req: NextRequest) {
 }
 
 export async function PUT(req: NextRequest) {
+  const { supabase, user, response } = await requireAuth()
+  if (response) return response
+
   try {
-    const supabase = createClient()
-
-    const { data: { user }, error: authErr } = await supabase.auth.getUser()
-    if (authErr || !user) {
-      return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
-    }
-
     const { id, ...updates } = await req.json()
-    if (!id) {
-      return NextResponse.json({ error: 'Lead ID required' }, { status: 400 })
-    }
+    if (!id) return NextResponse.json({ error: 'Lead ID required' }, { status: 400 })
 
     delete updates.user_id
 
-    const { data, error } = await supabase
+    const { data, error } = await supabase!
       .from('leads')
       .update({ ...updates, updated_at: new Date().toISOString() })
       .eq('id', id)
-      .eq('user_id', user.id)
+      .eq('user_id', user!.id)
       .select()
       .single()
 
     if (error) throw error
-
     return NextResponse.json({ lead: data })
   } catch (e: any) {
     console.error('[leads PUT]', e.message)
@@ -139,28 +101,20 @@ export async function PUT(req: NextRequest) {
 }
 
 export async function DELETE(req: NextRequest) {
+  const { supabase, user, response } = await requireAuth()
+  if (response) return response
+
   try {
-    const supabase = createClient()
+    const id = new URL(req.url).searchParams.get('id')
+    if (!id) return NextResponse.json({ error: 'Lead ID required' }, { status: 400 })
 
-    const { data: { user }, error: authErr } = await supabase.auth.getUser()
-    if (authErr || !user) {
-      return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
-    }
-
-    const { searchParams } = new URL(req.url)
-    const id = searchParams.get('id')
-    if (!id) {
-      return NextResponse.json({ error: 'Lead ID required' }, { status: 400 })
-    }
-
-    const { error } = await supabase
+    const { error } = await supabase!
       .from('leads')
       .delete()
       .eq('id', id)
-      .eq('user_id', user.id)
+      .eq('user_id', user!.id)
 
     if (error) throw error
-
     return NextResponse.json({ success: true })
   } catch (e: any) {
     console.error('[leads DELETE]', e.message)

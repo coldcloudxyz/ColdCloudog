@@ -9,18 +9,18 @@ import {
   TrendingUp, Users, Mail, MessageSquare,
   Calendar, ArrowUpRight, Loader2, RefreshCw
 } from 'lucide-react'
-import { supabase } from '@/lib/supabase'
+import { createBrowserClient } from '@/lib/supabase'
 import { cn } from '@/lib/utils'
 
 // ── Types ─────────────────────────────────────────────────────────────────────
 
 interface LeadRow {
-  status: string
-  email_sent_at:    string | null
-  opened_at:        string | null
-  replied_at:       string | null
+  status:            string
+  email_sent_at:     string | null
+  email_opened_at:   string | null
+  email_replied_at:  string | null
   meeting_booked_at: string | null
-  campaign_id:      string | null
+  campaign_id:       string | null
 }
 
 interface CampaignRow {
@@ -69,13 +69,13 @@ function buildLast14Days(leads: LeadRow[]): DayBucket[] {
         ? new Date(ts).toLocaleDateString('en-US', { month: 'short', day: 'numeric' })
         : null
 
-    const sentKey    = toKey(lead.email_sent_at)
-    const openedKey  = toKey(lead.opened_at)
-    const repliedKey = toKey(lead.replied_at)
+    const sk = toKey(lead.email_sent_at)
+    const ok = toKey(lead.email_opened_at)
+    const rk = toKey(lead.email_replied_at)
 
-    if (sentKey    && buckets[sentKey])    buckets[sentKey].sent++
-    if (openedKey  && buckets[openedKey])  buckets[openedKey].opened++
-    if (repliedKey && buckets[repliedKey]) buckets[repliedKey].replied++
+    if (sk && buckets[sk]) buckets[sk].sent++
+    if (ok && buckets[ok]) buckets[ok].opened++
+    if (rk && buckets[rk]) buckets[rk].replied++
   })
 
   return Object.values(buckets)
@@ -83,9 +83,7 @@ function buildLast14Days(leads: LeadRow[]): DayBucket[] {
 
 function buildPipeline(leads: LeadRow[]): PipelineSlice[] {
   const counts: Record<string, number> = {}
-  leads.forEach(l => {
-    counts[l.status] = (counts[l.status] ?? 0) + 1
-  })
+  leads.forEach(l => { counts[l.status] = (counts[l.status] ?? 0) + 1 })
   return [
     { name: 'New',            value: counts['new']            ?? 0, color: '#94a3b8' },
     { name: 'Contacted',      value: counts['contacted']      ?? 0, color: '#0ea5e9' },
@@ -98,11 +96,11 @@ function buildPipeline(leads: LeadRow[]): PipelineSlice[] {
 
 const tooltipStyle = {
   contentStyle: {
-    background: '#1e293b',
-    border: '1px solid #334155',
+    background:   '#1e293b',
+    border:       '1px solid #334155',
     borderRadius: 8,
-    fontSize: 12,
-    color: '#f1f5f9',
+    fontSize:     12,
+    color:        '#f1f5f9',
   },
   labelStyle: { color: '#94a3b8', fontWeight: 600 },
 }
@@ -112,7 +110,6 @@ const tooltipStyle = {
 export default function AnalyticsPage() {
   const [loading, setLoading] = useState(true)
 
-  // KPIs — all start at 0, never hardcoded
   const [totalLeads,     setTotalLeads]     = useState(0)
   const [emailsSent,     setEmailsSent]     = useState(0)
   const [totalOpened,    setTotalOpened]    = useState(0)
@@ -122,41 +119,32 @@ export default function AnalyticsPage() {
   const [replyRate,      setReplyRate]      = useState(0)
   const [convRate,       setConvRate]       = useState(0)
 
-  // Chart data — all start empty
   const [timelineData, setTimelineData] = useState<DayBucket[]>([])
   const [pipelineData, setPipelineData] = useState<PipelineSlice[]>([])
   const [campaignPerf, setCampaignPerf] = useState<CampaignPerf[]>([])
 
-  useEffect(() => {
-    loadAnalytics()
-  }, [])
+  useEffect(() => { loadAnalytics() }, [])
 
   async function loadAnalytics() {
     setLoading(true)
-    try {
+    // Create client inside the function — never at module level
+    const supabase = createBrowserClient()
 
-      // ── 1. Fetch every lead row we need ──────────────────────
-      // Columns used:
-      //   email_sent_at  → Emails Sent count + timeline
-      //   opened_at      → Opened count + timeline
-      //   replied_at     → Replied count + timeline
-      //   meeting_booked_at → cross-check (status field is primary)
-      //   status         → pipeline donut
-      //   campaign_id    → reserved for future per-campaign drill-down
+    try {
       const { data: leads, error: leadsErr } = await supabase
         .from('leads')
         .select(
-          'status, email_sent_at, opened_at, replied_at, meeting_booked_at, campaign_id'
+          'status, email_sent_at, email_opened_at, email_replied_at, meeting_booked_at, campaign_id'
         )
 
       if (leadsErr) throw leadsErr
 
       const rows: LeadRow[] = leads ?? []
 
-      // ── 2. Calculate KPIs directly from real rows ────────────
-      const sent     = rows.filter(r => r.email_sent_at  !== null).length
-      const opened   = rows.filter(r => r.opened_at      !== null).length
-      const replied  = rows.filter(r => r.replied_at     !== null).length
+      // Count from real column names — email_sent_at, email_opened_at, email_replied_at
+      const sent     = rows.filter(r => r.email_sent_at    !== null).length
+      const opened   = rows.filter(r => r.email_opened_at  !== null).length
+      const replied  = rows.filter(r => r.email_replied_at !== null).length
       const meetings = rows.filter(r => r.status === 'meeting_booked').length
 
       setTotalLeads(rows.length)
@@ -164,17 +152,13 @@ export default function AnalyticsPage() {
       setTotalOpened(opened)
       setTotalReplied(replied)
       setMeetingsBooked(meetings)
-
-      // Rates — always 0 when denominator is 0, never NaN
-      setOpenRate( sent > 0        ? Math.round((opened   / sent)       * 100) : 0)
-      setReplyRate(sent > 0        ? Math.round((replied  / sent)       * 100) : 0)
+      setOpenRate( sent > 0        ? Math.round((opened   / sent)        * 100) : 0)
+      setReplyRate(sent > 0        ? Math.round((replied  / sent)        * 100) : 0)
       setConvRate( rows.length > 0 ? Math.round((meetings / rows.length) * 1000) / 10 : 0)
 
-      // ── 3. Build chart data from the same rows ───────────────
       setTimelineData(buildLast14Days(rows))
       setPipelineData(buildPipeline(rows))
 
-      // ── 4. Campaign bar chart from campaigns table ───────────
       const { data: campaigns } = await supabase
         .from('campaigns')
         .select('id, name, emails_sent, replies, meetings_booked')
@@ -189,7 +173,6 @@ export default function AnalyticsPage() {
           meetings: c.meetings_booked ?? 0,
         }))
       )
-
     } catch (e: any) {
       console.error('[analytics] load error:', e.message)
     } finally {
@@ -197,12 +180,10 @@ export default function AnalyticsPage() {
     }
   }
 
-  // ── Derived flags for empty-state rendering ──────────────────
   const hasTimeline  = timelineData.some(d => d.sent > 0)
   const hasPipeline  = pipelineData.length > 0
   const hasCampaigns = campaignPerf.length > 0
 
-  // ── KPI card definitions (values come from state, never hardcoded) ──
   const kpis = [
     {
       label: 'Total Leads',
@@ -223,7 +204,7 @@ export default function AnalyticsPage() {
     {
       label: 'Opened',
       value: `${totalOpened.toLocaleString()} (${openRate}%)`,
-      sub:   'opened_at not null',
+      sub:   'email_opened_at not null',
       icon:  TrendingUp,
       color: 'text-amber-600 dark:text-amber-400',
       bg:    'bg-amber-50 dark:bg-amber-950',
@@ -231,7 +212,7 @@ export default function AnalyticsPage() {
     {
       label: 'Replied',
       value: `${totalReplied.toLocaleString()} (${replyRate}%)`,
-      sub:   'replied_at not null',
+      sub:   'email_replied_at not null',
       icon:  MessageSquare,
       color: 'text-purple-600 dark:text-purple-400',
       bg:    'bg-purple-50 dark:bg-purple-950',
@@ -246,11 +227,9 @@ export default function AnalyticsPage() {
     },
   ]
 
-  // ── Render ───────────────────────────────────────────────────
   return (
     <div className="p-6 lg:p-8 max-w-7xl mx-auto">
 
-      {/* Header */}
       <div className="flex items-center justify-between mb-8">
         <div>
           <h1 className="text-2xl font-bold">Analytics</h1>
@@ -261,8 +240,8 @@ export default function AnalyticsPage() {
         <button
           onClick={loadAnalytics}
           className="btn-ghost text-sm"
-          title="Refresh data"
           disabled={loading}
+          title="Refresh"
         >
           <RefreshCw className={cn('w-4 h-4', loading && 'animate-spin')} />
         </button>
@@ -284,8 +263,7 @@ export default function AnalyticsPage() {
                   <Icon className={color} style={{ width: 18, height: 18 }} />
                 </div>
                 <span className="flex items-center gap-1 text-xs font-medium text-green-600 dark:text-green-400">
-                  <ArrowUpRight className="w-3.5 h-3.5" />
-                  Live
+                  <ArrowUpRight className="w-3.5 h-3.5" /> Live
                 </span>
               </div>
               <div className="text-xl font-bold leading-tight">{value}</div>
@@ -299,7 +277,6 @@ export default function AnalyticsPage() {
       {/* Timeline + Pipeline */}
       <div className="grid lg:grid-cols-3 gap-6 mb-6">
 
-        {/* Email activity timeline */}
         <div className="lg:col-span-2 card p-5">
           <div className="flex items-center justify-between mb-5">
             <div>
@@ -316,8 +293,7 @@ export default function AnalyticsPage() {
                   key={label}
                   className="flex items-center gap-1.5 text-surface-500 dark:text-surface-400"
                 >
-                  <span className={`w-2 h-2 rounded-full ${color}`} />
-                  {label}
+                  <span className={`w-2 h-2 rounded-full ${color}`} /> {label}
                 </div>
               ))}
             </div>
@@ -360,33 +336,14 @@ export default function AnalyticsPage() {
                   allowDecimals={false}
                 />
                 <Tooltip {...tooltipStyle} />
-                <Area
-                  type="monotone"
-                  dataKey="sent"
-                  stroke="#0ea5e9"
-                  fill="url(#sent)"
-                  strokeWidth={2}
-                />
-                <Area
-                  type="monotone"
-                  dataKey="opened"
-                  stroke="#22d3ee"
-                  fill="url(#opened)"
-                  strokeWidth={2}
-                />
-                <Area
-                  type="monotone"
-                  dataKey="replied"
-                  stroke="#f59e0b"
-                  fill="url(#replied)"
-                  strokeWidth={2}
-                />
+                <Area type="monotone" dataKey="sent"    stroke="#0ea5e9" fill="url(#sent)"    strokeWidth={2} />
+                <Area type="monotone" dataKey="opened"  stroke="#22d3ee" fill="url(#opened)"  strokeWidth={2} />
+                <Area type="monotone" dataKey="replied" stroke="#f59e0b" fill="url(#replied)" strokeWidth={2} />
               </AreaChart>
             </ResponsiveContainer>
           )}
         </div>
 
-        {/* Pipeline donut */}
         <div className="card p-5">
           <h2 className="font-semibold mb-1">Lead Pipeline</h2>
           <p className="text-xs text-surface-400 mb-4">By current status</p>
@@ -405,10 +362,8 @@ export default function AnalyticsPage() {
                 <PieChart>
                   <Pie
                     data={pipelineData}
-                    cx="50%"
-                    cy="50%"
-                    innerRadius={50}
-                    outerRadius={80}
+                    cx="50%" cy="50%"
+                    innerRadius={50} outerRadius={80}
                     dataKey="value"
                     strokeWidth={0}
                   >
@@ -421,10 +376,7 @@ export default function AnalyticsPage() {
               </ResponsiveContainer>
               <div className="space-y-2 mt-3">
                 {pipelineData.map(item => (
-                  <div
-                    key={item.name}
-                    className="flex items-center justify-between text-xs"
-                  >
+                  <div key={item.name} className="flex items-center justify-between text-xs">
                     <div className="flex items-center gap-2">
                       <span
                         className="w-2.5 h-2.5 rounded-full flex-shrink-0"
@@ -443,7 +395,7 @@ export default function AnalyticsPage() {
         </div>
       </div>
 
-      {/* Campaign performance bar chart */}
+      {/* Campaign performance */}
       <div className="card p-5">
         <h2 className="font-semibold mb-1">Campaign Performance</h2>
         <p className="text-xs text-surface-400 mb-5">
@@ -456,9 +408,7 @@ export default function AnalyticsPage() {
           <div className="h-[220px] flex flex-col items-center justify-center text-surface-400 text-sm text-center gap-1">
             <TrendingUp className="w-8 h-8 opacity-30 mb-1" />
             <p className="font-medium">No campaigns yet</p>
-            <p className="text-xs">
-              Create a campaign from the Campaigns page to see performance here
-            </p>
+            <p className="text-xs">Create a campaign to see performance here</p>
           </div>
         ) : (
           <ResponsiveContainer width="100%" height={220}>
@@ -477,24 +427,9 @@ export default function AnalyticsPage() {
               />
               <Tooltip {...tooltipStyle} />
               <Legend wrapperStyle={{ fontSize: 12, color: '#94a3b8' }} />
-              <Bar
-                dataKey="sent"
-                fill="#0ea5e9"
-                radius={[4, 4, 0, 0]}
-                name="Sent"
-              />
-              <Bar
-                dataKey="replies"
-                fill="#f59e0b"
-                radius={[4, 4, 0, 0]}
-                name="Replies"
-              />
-              <Bar
-                dataKey="meetings"
-                fill="#22c55e"
-                radius={[4, 4, 0, 0]}
-                name="Meetings"
-              />
+              <Bar dataKey="sent"     fill="#0ea5e9" radius={[4, 4, 0, 0]} name="Sent"     />
+              <Bar dataKey="replies"  fill="#f59e0b" radius={[4, 4, 0, 0]} name="Replies"  />
+              <Bar dataKey="meetings" fill="#22c55e" radius={[4, 4, 0, 0]} name="Meetings" />
             </BarChart>
           </ResponsiveContainer>
         )}

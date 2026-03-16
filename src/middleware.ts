@@ -4,6 +4,8 @@ import { NextResponse, type NextRequest } from 'next/server'
 export async function middleware(request: NextRequest) {
   let supabaseResponse = NextResponse.next({ request })
 
+  // Never import from @/lib here — middleware runs on the edge
+  // and must be self-contained
   const supabase = createServerClient(
     process.env.NEXT_PUBLIC_SUPABASE_URL!,
     process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!,
@@ -25,25 +27,19 @@ export async function middleware(request: NextRequest) {
     }
   )
 
-  // Refresh the session on every request.
-  // This keeps the cookie alive and is required by Supabase SSR.
-  // Do not remove this line.
+  // IMPORTANT: do not add any logic between createServerClient and getUser()
+  // Refreshes session and keeps cookie alive on every request
   const { data: { user } } = await supabase.auth.getUser()
 
   const { pathname } = request.nextUrl
 
-  // Not logged in and trying to reach dashboard → send to login
   if (!user && pathname.startsWith('/dashboard')) {
     const url = request.nextUrl.clone()
     url.pathname = '/auth/login'
     return NextResponse.redirect(url)
   }
 
-  // Already logged in and visiting auth pages → send to dashboard
-  if (
-    user &&
-    (pathname === '/auth/login' || pathname === '/auth/signup')
-  ) {
+  if (user && (pathname === '/auth/login' || pathname === '/auth/signup')) {
     const url = request.nextUrl.clone()
     url.pathname = '/dashboard'
     return NextResponse.redirect(url)
@@ -53,7 +49,5 @@ export async function middleware(request: NextRequest) {
 }
 
 export const config = {
-  matcher: [
-    '/((?!_next/static|_next/image|favicon.ico|api/).*)',
-  ],
+  matcher: ['/((?!_next/static|_next/image|favicon.ico|api/).*)'],
 }

@@ -5,103 +5,105 @@ import {
   Mail, Send, Eye, MessageSquare, Search,
   Clock, Loader2, RefreshCw, InboxIcon
 } from 'lucide-react'
-import { supabase } from '@/lib/supabase'
-import { formatRelativeTime } from '@/lib/utils'
-import { cn } from '@/lib/utils'
+import { createBrowserClient } from '@/lib/supabase'
+import { formatRelativeTime, cn } from '@/lib/utils'
 
 interface EmailRecord {
-  id: string
-  name: string
-  email: string
-  company: string
+  id:                   string
+  name:                 string
+  email:                string
+  company:              string
   personalized_message: string | null
-  status: string
-  email_sent_at: string | null
-  email_opened_at: string | null
-  email_replied_at: string | null
+  status:               string
+  email_sent_at:        string | null
+  email_opened_at:      string | null
+  email_replied_at:     string | null
 }
 
 const statusConfig = {
   replied: {
-    icon: MessageSquare,
+    icon:  MessageSquare,
     color: 'text-green-600 dark:text-green-400',
-    bg: 'bg-green-50 dark:bg-green-950',
+    bg:    'bg-green-50 dark:bg-green-950',
     label: 'Replied',
   },
   opened: {
-    icon: Eye,
+    icon:  Eye,
     color: 'text-blue-600 dark:text-blue-400',
-    bg: 'bg-blue-50 dark:bg-blue-950',
+    bg:    'bg-blue-50 dark:bg-blue-950',
     label: 'Opened',
   },
   contacted: {
-    icon: Send,
+    icon:  Send,
     color: 'text-surface-500 dark:text-surface-400',
-    bg: 'bg-surface-100 dark:bg-surface-800',
+    bg:    'bg-surface-100 dark:bg-surface-800',
     label: 'Sent',
   },
 }
 
 export default function EmailsPage() {
-  const [emails, setEmails] = useState<EmailRecord[]>([])
+  const [emails,  setEmails]  = useState<EmailRecord[]>([])
   const [loading, setLoading] = useState(true)
-  const [search, setSearch] = useState('')
-  const [filter, setFilter] = useState('all')
+  const [search,  setSearch]  = useState('')
+  const [filter,  setFilter]  = useState('all')
 
-  useEffect(() => {
-    loadEmails()
-  }, [])
+  useEffect(() => { loadEmails() }, [])
 
   async function loadEmails() {
     setLoading(true)
+    // Create client inside the function — never at module level
+    const supabase = createBrowserClient()
+
     try {
       const { data, error } = await supabase
         .from('leads')
-        .select('id, name, email, company, personalized_message, status, email_sent_at, email_opened_at, email_replied_at')
+        .select(
+          'id, name, email, company, personalized_message, status, email_sent_at, email_opened_at, email_replied_at'
+        )
         .not('email_sent_at', 'is', null)
         .order('email_sent_at', { ascending: false })
 
       if (error) throw error
       setEmails(data ?? [])
     } catch (e: any) {
-      console.error('Failed to load emails:', e.message)
+      console.error('[emails] load error:', e.message)
       setEmails([])
     } finally {
       setLoading(false)
     }
   }
 
-  function getDisplayStatus(record: EmailRecord) {
+  function getDisplayStatus(record: EmailRecord): keyof typeof statusConfig {
     if (record.email_replied_at) return 'replied'
-    if (record.email_opened_at) return 'opened'
+    if (record.email_opened_at)  return 'opened'
     return 'contacted'
   }
 
   const filtered = emails.filter(e => {
     const matchSearch =
       !search ||
-      e.name.toLowerCase().includes(search.toLowerCase()) ||
+      e.name.toLowerCase().includes(search.toLowerCase())    ||
       e.company.toLowerCase().includes(search.toLowerCase()) ||
       e.email.toLowerCase().includes(search.toLowerCase())
+
     const displayStatus = getDisplayStatus(e)
     const matchFilter =
       filter === 'all' ||
       (filter === 'sent' && displayStatus === 'contacted') ||
       filter === displayStatus
+
     return matchSearch && matchFilter
   })
 
   const totalSent    = emails.length
   const totalOpened  = emails.filter(e => e.email_opened_at).length
   const totalReplied = emails.filter(e => e.email_replied_at).length
-
-  const openRate   = totalSent > 0 ? Math.round((totalOpened  / totalSent) * 100) : 0
-  const replyRate  = totalSent > 0 ? Math.round((totalReplied / totalSent) * 100) : 0
+  const openRate     = totalSent > 0 ? Math.round((totalOpened  / totalSent) * 100) : 0
+  const replyRate    = totalSent > 0 ? Math.round((totalReplied / totalSent) * 100) : 0
 
   return (
     <div className="p-6 lg:p-8 max-w-7xl mx-auto">
 
-      {/* Header */}
       <div className="flex items-center justify-between mb-8">
         <div>
           <h1 className="text-2xl font-bold">Email Center</h1>
@@ -109,11 +111,7 @@ export default function EmailsPage() {
             Track all outreach emails and engagement
           </p>
         </div>
-        <button
-          onClick={loadEmails}
-          className="btn-ghost text-sm"
-          title="Refresh"
-        >
+        <button onClick={loadEmails} className="btn-ghost text-sm" title="Refresh">
           <RefreshCw className={cn('w-4 h-4', loading && 'animate-spin')} />
         </button>
       </div>
@@ -124,26 +122,26 @@ export default function EmailsPage() {
           {
             label: 'Emails Sent',
             value: totalSent,
-            sub: 'total outreach',
-            icon: Send,
+            sub:   'total outreach',
+            icon:  Send,
             color: 'text-surface-600 dark:text-surface-400',
-            bg: 'bg-surface-100 dark:bg-surface-800',
+            bg:    'bg-surface-100 dark:bg-surface-800',
           },
           {
             label: 'Opened',
             value: totalOpened,
-            sub: `${openRate}% open rate`,
-            icon: Eye,
+            sub:   `${openRate}% open rate`,
+            icon:  Eye,
             color: 'text-blue-600 dark:text-blue-400',
-            bg: 'bg-blue-50 dark:bg-blue-950',
+            bg:    'bg-blue-50 dark:bg-blue-950',
           },
           {
             label: 'Replied',
             value: totalReplied,
-            sub: `${replyRate}% reply rate`,
-            icon: MessageSquare,
+            sub:   `${replyRate}% reply rate`,
+            icon:  MessageSquare,
             color: 'text-green-600 dark:text-green-400',
-            bg: 'bg-green-50 dark:bg-green-950',
+            bg:    'bg-green-50 dark:bg-green-950',
           },
         ].map(({ label, value, sub, icon: Icon, color, bg }) => (
           <div key={label} className="card p-4 sm:p-5">
@@ -180,9 +178,7 @@ export default function EmailsPage() {
               onClick={() => setFilter(key)}
               className={cn(
                 'px-3 py-2 rounded-lg text-sm font-medium transition-colors',
-                filter === key
-                  ? 'bg-brand-600 text-white'
-                  : 'btn-secondary'
+                filter === key ? 'bg-brand-600 text-white' : 'btn-secondary'
               )}
             >
               {label}
@@ -208,7 +204,7 @@ export default function EmailsPage() {
             </p>
             <p className="text-sm mt-1">
               {emails.length === 0
-                ? 'Send your first outreach from the Leads page to see activity here'
+                ? 'Send your first outreach from the Leads page'
                 : 'Try a different search or filter'}
             </p>
           </div>
@@ -216,7 +212,7 @@ export default function EmailsPage() {
           <div className="divide-y divide-surface-50 dark:divide-surface-800">
             {filtered.map(record => {
               const displayStatus = getDisplayStatus(record)
-              const cfg = statusConfig[displayStatus as keyof typeof statusConfig]
+              const cfg  = statusConfig[displayStatus]
               const Icon = cfg.icon
 
               return (
@@ -225,12 +221,10 @@ export default function EmailsPage() {
                   className="p-4 hover:bg-surface-50 dark:hover:bg-surface-800/50 transition-colors"
                 >
                   <div className="flex items-start gap-4">
-                    {/* Avatar */}
                     <div className="w-9 h-9 rounded-full bg-gradient-to-br from-brand-400 to-cyan-400 flex items-center justify-center text-white text-sm font-bold flex-shrink-0">
                       {record.name[0]?.toUpperCase()}
                     </div>
 
-                    {/* Content */}
                     <div className="flex-1 min-w-0">
                       <div className="flex items-center gap-2 mb-0.5">
                         <span className="font-medium text-sm">{record.name}</span>
@@ -240,7 +234,6 @@ export default function EmailsPage() {
                         <span className="text-surface-400 text-xs">{record.email}</span>
                       </div>
 
-                      {/* Message preview */}
                       {record.personalized_message ? (
                         <p className="text-sm text-surface-600 dark:text-surface-400 truncate">
                           {record.personalized_message}
@@ -251,7 +244,6 @@ export default function EmailsPage() {
                         </p>
                       )}
 
-                      {/* Timestamps */}
                       <div className="flex items-center gap-4 mt-1.5 flex-wrap">
                         {record.email_sent_at && (
                           <span className="text-xs text-surface-400 flex items-center gap-1">
@@ -274,7 +266,6 @@ export default function EmailsPage() {
                       </div>
                     </div>
 
-                    {/* Status badge */}
                     <div className={`flex items-center gap-1.5 px-2.5 py-1 rounded-full text-xs font-medium flex-shrink-0 ${cfg.bg} ${cfg.color}`}>
                       <Icon className="w-3 h-3" />
                       {cfg.label}

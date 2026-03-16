@@ -1,10 +1,8 @@
-// Browser client — safe to use in client components
+// Browser client — import this in all 'use client' files
 export { createBrowserSupabaseClient as createBrowserClient } from './supabase/client'
 
-// Server client — only call from Server Components or Server Actions
-// Never import this in a client component
+// Server client — import this in Server Components and Server Actions only
 export { createServerSupabaseClient } from './supabase/server'
 
-// Admin client — only call from API routes
-// Never import this in a client component
-export { createAdminClient } from './supabase/admin'
+// Admin client — import this in API routes only, never in client code
+export { createAdminSupabaseClient as createAdminClient } from './supabase/admin'
