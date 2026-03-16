@@ -1,11 +1,29 @@
 import { NextRequest, NextResponse } from 'next/server'
+import { createServerClient } from '@supabase/ssr'
 import { cookies } from 'next/headers'
-import { createRouteHandlerClient } from '@supabase/auth-helpers-nextjs'
 import OpenAI from 'openai'
+
+function createClient() {
+  const cookieStore = cookies()
+  return createServerClient(
+    process.env.NEXT_PUBLIC_SUPABASE_URL!,
+    process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!,
+    {
+      cookies: {
+        getAll() { return cookieStore.getAll() },
+        setAll(cookiesToSet) {
+          cookiesToSet.forEach(({ name, value, options }) =>
+            cookieStore.set(name, value, options)
+          )
+        },
+      },
+    }
+  )
+}
 
 export async function POST(req: NextRequest) {
   try {
-    const supabase = createRouteHandlerClient({ cookies })
+    const supabase = createClient()
 
     const { data: { user }, error: authErr } = await supabase.auth.getUser()
     if (authErr || !user) {
@@ -29,7 +47,6 @@ export async function POST(req: NextRequest) {
       )
     }
 
-    // Scrape website for context
     let websiteContext = ''
     if (website) {
       try {
@@ -46,13 +63,17 @@ export async function POST(req: NextRequest) {
           .trim()
           .slice(0, 2000)
       } catch {
-        // Continue without website context
+        // continue without context
       }
     }
 
     const openai = new OpenAI({ apiKey })
 
-    const prompt = `You are an expert cold email copywriter. Write a short, personalized B2B outreach email.
+    const completion = await openai.chat.completions.create({
+      model: 'gpt-4o-mini',
+      messages: [{
+        role: 'user',
+        content: `You are an expert cold email copywriter. Write a short, personalized B2B outreach email.
 
 Target:
 - Name: ${name}
@@ -68,11 +89,8 @@ Requirements:
 5. Never start with "I hope this email finds you well"
 6. Sign off with [Your Name]
 
-Write ONLY the email body. No subject line, no extra commentary.`
-
-    const completion = await openai.chat.completions.create({
-      model:       'gpt-4o-mini',
-      messages:    [{ role: 'user', content: prompt }],
+Write ONLY the email body. No subject line, no extra text.`,
+      }],
       max_tokens:  300,
       temperature: 0.7,
     })
@@ -80,9 +98,8 @@ Write ONLY the email body. No subject line, no extra commentary.`
     const message = completion.choices[0]?.message?.content?.trim()
     if (!message) throw new Error('OpenAI returned an empty response')
 
-    // Save back to the lead row — scoped to this user
     if (leadId) {
-      const { error: updateErr } = await supabase
+      await supabase
         .from('leads')
         .update({
           personalized_message: message,
@@ -90,18 +107,11 @@ Write ONLY the email body. No subject line, no extra commentary.`
         })
         .eq('id', leadId)
         .eq('user_id', user.id)
-
-      if (updateErr) {
-        console.warn('[messages/generate] DB update failed:', updateErr.message)
-      }
     }
 
     return NextResponse.json({ message })
   } catch (e: any) {
     console.error('[messages/generate]', e.message)
-    return NextResponse.json(
-      { error: e.message ?? 'Failed to generate message' },
-      { status: 500 }
-    )
+    return NextResponse.json({ error: e.message }, { status: 500 })
   }
 }

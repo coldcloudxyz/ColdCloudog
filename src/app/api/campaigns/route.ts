@@ -1,10 +1,30 @@
 import { NextRequest, NextResponse } from 'next/server'
+import { createServerClient } from '@supabase/ssr'
 import { cookies } from 'next/headers'
-import { createRouteHandlerClient } from '@supabase/auth-helpers-nextjs'
+
+function createClient() {
+  const cookieStore = cookies()
+  return createServerClient(
+    process.env.NEXT_PUBLIC_SUPABASE_URL!,
+    process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!,
+    {
+      cookies: {
+        getAll() {
+          return cookieStore.getAll()
+        },
+        setAll(cookiesToSet) {
+          cookiesToSet.forEach(({ name, value, options }) =>
+            cookieStore.set(name, value, options)
+          )
+        },
+      },
+    }
+  )
+}
 
 export async function GET(req: NextRequest) {
   try {
-    const supabase = createRouteHandlerClient({ cookies })
+    const supabase = createClient()
 
     const { data: { user }, error: authErr } = await supabase.auth.getUser()
     if (authErr || !user) {
@@ -28,7 +48,7 @@ export async function GET(req: NextRequest) {
 
 export async function POST(req: NextRequest) {
   try {
-    const supabase = createRouteHandlerClient({ cookies })
+    const supabase = createClient()
 
     const { data: { user }, error: authErr } = await supabase.auth.getUser()
     if (authErr || !user) {
@@ -38,7 +58,10 @@ export async function POST(req: NextRequest) {
     const body = await req.json()
 
     if (!body.name?.trim()) {
-      return NextResponse.json({ error: 'Campaign name is required' }, { status: 400 })
+      return NextResponse.json(
+        { error: 'Campaign name is required' },
+        { status: 400 }
+      )
     }
 
     const { data, error } = await supabase
@@ -58,10 +81,7 @@ export async function POST(req: NextRequest) {
       .select()
       .single()
 
-    if (error) {
-      console.error('[campaigns POST]', error.message)
-      throw error
-    }
+    if (error) throw error
 
     return NextResponse.json({ campaign: data }, { status: 201 })
   } catch (e: any) {
@@ -72,7 +92,7 @@ export async function POST(req: NextRequest) {
 
 export async function PUT(req: NextRequest) {
   try {
-    const supabase = createRouteHandlerClient({ cookies })
+    const supabase = createClient()
 
     const { data: { user }, error: authErr } = await supabase.auth.getUser()
     if (authErr || !user) {

@@ -1,11 +1,28 @@
-export const dynamic = "force-dynamic"
 import { NextRequest, NextResponse } from 'next/server'
+import { createServerClient } from '@supabase/ssr'
 import { cookies } from 'next/headers'
-import { createRouteHandlerClient } from '@supabase/auth-helpers-nextjs'
+
+function createClient() {
+  const cookieStore = cookies()
+  return createServerClient(
+    process.env.NEXT_PUBLIC_SUPABASE_URL!,
+    process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!,
+    {
+      cookies: {
+        getAll() { return cookieStore.getAll() },
+        setAll(cookiesToSet) {
+          cookiesToSet.forEach(({ name, value, options }) =>
+            cookieStore.set(name, value, options)
+          )
+        },
+      },
+    }
+  )
+}
 
 export async function GET(req: NextRequest) {
   try {
-    const supabase = createRouteHandlerClient({ cookies })
+    const supabase = createClient()
 
     const { data: { user }, error: authErr } = await supabase.auth.getUser()
     if (authErr || !user) {
@@ -28,14 +45,13 @@ export async function GET(req: NextRequest) {
 
     return NextResponse.json({ steps: data ?? [] })
   } catch (e: any) {
-    console.error('[campaigns/steps GET]', e.message)
     return NextResponse.json({ error: e.message }, { status: 500 })
   }
 }
 
 export async function PUT(req: NextRequest) {
   try {
-    const supabase = createRouteHandlerClient({ cookies })
+    const supabase = createClient()
 
     const { data: { user }, error: authErr } = await supabase.auth.getUser()
     if (authErr || !user) {
@@ -49,11 +65,7 @@ export async function PUT(req: NextRequest) {
 
     const { data, error } = await supabase
       .from('campaign_steps')
-      .update({
-        subject,
-        email_template,
-        updated_at: new Date().toISOString(),
-      })
+      .update({ subject, email_template, updated_at: new Date().toISOString() })
       .eq('id', id)
       .eq('user_id', user.id)
       .select()
@@ -63,7 +75,6 @@ export async function PUT(req: NextRequest) {
 
     return NextResponse.json({ step: data })
   } catch (e: any) {
-    console.error('[campaigns/steps PUT]', e.message)
     return NextResponse.json({ error: e.message }, { status: 500 })
   }
 }
