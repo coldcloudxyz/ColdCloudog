@@ -1,8 +1,11 @@
-// Browser client — import this in all 'use client' files
-export { createBrowserSupabaseClient as createBrowserClient } from './supabase/client'
+import { createBrowserClient } from '@supabase/ssr'
 
-// Server client — import this in Server Components and Server Actions only
-export { createServerSupabaseClient } from './supabase/server'
+export function createBrowserClientInstance() {
+  return createBrowserClient(
+    process.env.NEXT_PUBLIC_SUPABASE_URL!,
+    process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!
+  )
+}
 
-// Admin client — import this in API routes only, never in client code
-export { createAdminSupabaseClient as createAdminClient } from './supabase/admin'
+// Temporary compatibility export so old imports don't break
+export const supabase = createBrowserClientInstance()
